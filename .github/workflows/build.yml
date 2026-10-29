@@ -1,0 +1,144 @@
+name: Build PanelRun (Windows x64)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build.yml"
+      - "README.md"
+  pull_request:
+    paths:
+      - ".github/workflows/build.yml"
+      - "README.md"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-x64:
+    name: Build Lunaria runtime for Windows x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out builder repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git make \
+            curl wget zip unzip bzip2 zstd tar python3 python3-pip \
+            libboost-dev libbsd-dev libunwind-dev libglfw3-dev \
+            libegl1-mesa-dev libgles2-mesa-dev libssl-dev zlib1g-dev \
+            libasound2-dev libvulkan-dev
+
+      - name: Install Android SDK and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required Android packages
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-31" \
+            "build-tools;34.0.0" \
+            "ndk;27.2.12479018"
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/.android/sdk}}"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Install UCRT-capable LLVM-MinGW cross compiler
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          import json
+          import urllib.request
+
+          api = "https://api.github.com/repos/mstorsjo/llvm-mingw/releases/tags/20261020"
+          request = urllib.request.Request(api, headers={"Accept": "application/vnd.github+json", "User-Agent": "PanelRun-GitHub-Actions"})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              release = json.load(response)
+          matches = [asset for asset in release.get("assets", [])
+                     if asset.get("name", "").endswith(".tar.xz")
+                     and "ucrt-ubuntu-22.04-x86_64" in asset.get("name", "")]
+          if not matches:
+              available = "\n".join(asset.get("name", "") for asset in release.get("assets", []))
+              raise SystemExit("Could not find the expected Linux x64 UCRT toolchain asset. Available assets:\n" + available)
+          with open("/tmp/llvm-mingw-url", "w", encoding="utf-8") as output:
+              output.write(matches[0]["browser_download_url"])
+          print("Selected toolchain:", matches[0]["name"])
+          PY
+          TOOLCHAIN_URL="$(cat /tmp/llvm-mingw-url)"
+          curl --fail --location --retry 3 "$TOOLCHAIN_URL" -o "$RUNNER_TEMP/llvm-mingw.tar.xz"
+          tar -xJf "$RUNNER_TEMP/llvm-mingw.tar.xz" -C "$RUNNER_TEMP"
+          TOOLCHAIN_DIR="$(find "$RUNNER_TEMP" -maxdepth 1 -mindepth 1 -type d -name 'llvm-mingw-*' -print -quit)"
+          test -n "$TOOLCHAIN_DIR"
+          test -x "$TOOLCHAIN_DIR/bin/x86_64-w64-mingw32-gcc"
+          test -x "$TOOLCHAIN_DIR/bin/x86_64-w64-mingw32-g++"
+          echo "$TOOLCHAIN_DIR/bin" >> "$GITHUB_PATH"
+          echo "WIN_CROSS_PREFIX=x86_64-w64-mingw32-" >> "$GITHUB_ENV"
+
+      - name: Fetch Lunaria and its UI assets
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/yui0/lunaria.git lunaria-src
+          git clone --depth 1 https://github.com/yui0/luna-shell.git luna-shell
+          {
+            echo "Lunaria revision: $(git -C lunaria-src rev-parse HEAD)"
+            git -C lunaria-src log -1 --format='Lunaria commit date: %cs%nLunaria commit: %s'
+            echo "Luna-shell revision: $(git -C luna-shell rev-parse HEAD)"
+            git -C luna-shell log -1 --format='Luna-shell commit date: %cs%nLuna-shell commit: %s'
+          } | tee upstream-revision.txt
+          # Packaging looks for fonts in ../luna-shell/skins/fonts.
+          test -f luna-shell/skins/fonts/web/Inter-Regular.ttf
+          test -f luna-shell/skins/fonts/web/Inter-Bold.ttf
+
+      - name: Build the Windows x64 distribution
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd lunaria-src
+          make -j2 dist-cross-win DYNARMIC_JOBS=2
+
+      - name: Verify and stage the packaged runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ZIP_PATH="$(find lunaria-src -maxdepth 1 -type f -name 'lunaria-*-windows-x86_64.zip' -print -quit)"
+          if [ -z "$ZIP_PATH" ]; then
+            echo "ERROR: Lunaria build finished without producing the expected Windows x64 ZIP." >&2
+            find lunaria-src -maxdepth 2 -type f -name '*.zip' -print >&2 || true
+            exit 1
+          fi
+          mkdir -p output extracted
+          unzip -q "$ZIP_PATH" -d extracted
+          DIST_DIR="$(find extracted -mindepth 1 -maxdepth 1 -type d -name 'lunaria-*-windows-x86_64' -print -quit)"
+          test -n "$DIST_DIR"
+          test -f "$DIST_DIR/lunaria.exe"
+          test -d "$DIST_DIR/fonts"
+          if ! find "$DIST_DIR/fonts" -maxdepth 1 -type f \( -name '*.ttf' -o -name '*.otf' -o -name '*.ttc' \) | grep -q .; then
+            echo "ERROR: the packaged fonts directory is empty; refusing to publish a broken bundle." >&2
+            exit 1
+          fi
+          cp -a "$DIST_DIR/." output/
+          cp upstream-revision.txt output/
+          echo "Runtime bundle contents:"
+          find output -maxdepth 2 -type f -printf '%P (%s bytes)\n' | sort
+
+      - name: Upload Windows x64 runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: PanelRun-Windows-x64
+          path: output/
+          if-no-files-found: error
+          retention-days: 14
