@@ -23,7 +23,7 @@ window.jupiterToast = message => {
 };
 
 function setProjectName(name) {
-  app.project.name = name || 'Untitled';
+  app.project.name = name || 'Untitled Project';
   $('#project-name').textContent = app.project.name;
   $('#sequence-name').textContent = `${app.project.name} sequence`;
   $('#fps-select').value = String(app.project.fps || 24);
@@ -91,7 +91,7 @@ function renderMedia() {
   const container = $('#media-list');
   $('#media-count').textContent = String(app.project.assets.length);
   if (!app.project.assets.length) {
-    container.innerHTML = '<div class="media-empty">No media yet.<br><br>Import an image or audio file, then drag it onto V1 or A1.</div>';
+    container.innerHTML = '<div class="media-empty media-import-prompt" id="media-import-prompt"><span class="media-plus">＋</span><strong>Import media</strong><small>Double-click or right-click here</small></div>';
     return;
   }
   container.innerHTML = '';
@@ -227,7 +227,7 @@ function renderGraphEditor(parent, clip, node) {
   if (!clip) return;
   const section = document.createElement('section'); section.className = 'graph-editor';
   const heading = document.createElement('div'); heading.className = 'graph-heading';
-  const title = document.createElement('strong'); title.textContent = 'GRAPH';
+  const title = document.createElement('strong'); title.textContent = 'VALUE GRAPH';
   const property = document.createElement('select'); property.id = 'graph-property';
   const graphOptions = node
     ? [['node-x', 'Joint X'], ['node-y', 'Joint Y']]
@@ -250,14 +250,14 @@ function renderGraphEditor(parent, clip, node) {
     pushUndo('Change interpolation'); key.interpolation = interpolation.value; app.renderAll();
   });
   heading.appendChild(interpolation);
-  const canvas = document.createElement('canvas'); canvas.className = 'curve-canvas'; canvas.height = 140;
+  const canvas = document.createElement('canvas'); canvas.className = 'curve-canvas'; canvas.height = 300;
   const footer = document.createElement('div'); footer.className = 'graph-footer'; footer.textContent = 'DRAG KEY POINTS TO ADJUST TIME AND VALUE · DIAMONDS ARE KEYFRAMES';
   section.append(heading, canvas, footer); parent.appendChild(section);
 
   const drawGraph = () => {
     const rect = canvas.getBoundingClientRect();
     const width = Math.max(180, Math.floor(rect.width));
-    const height = 140; const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const height = Math.max(220, Math.floor(rect.height || 300)); const dpr = Math.min(2, window.devicePixelRatio || 1);
     canvas.width = width * dpr; canvas.height = height * dpr;
     const c = canvas.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, width, height);
     const current = graphValues(clip, node, property.value);
@@ -298,6 +298,7 @@ function renderGraphEditor(parent, clip, node) {
     return { current, px, py, min, max, left, right, top, bottom, maxFrame };
   };
   drawGraph();
+  const graphResize = new ResizeObserver(() => drawGraph()); graphResize.observe(canvas);
   let graphDrag = null;
   canvas.addEventListener('pointerdown', event => {
     const map = drawGraph();
@@ -342,6 +343,15 @@ function renderInspector() {
   const asset = findAsset(app.project.selectedAssetId) || (clip ? findAsset(clip.assetId) : null);
   const node = clip?.rig?.nodes.find(item => item.id === app.project.selectedNodeId);
   values.innerHTML = '';
+  const valuesLayout = document.createElement('div'); valuesLayout.className = 'values-layout';
+  const controlsColumn = document.createElement('div'); controlsColumn.className = 'values-controls';
+  const graphColumn = document.createElement('div'); graphColumn.className = 'values-graph';
+  valuesLayout.append(controlsColumn, graphColumn); values.appendChild(valuesLayout);
+  const keyNav = document.createElement('div'); keyNav.className = 'inspector-key-nav';
+  keyNav.innerHTML = '<span>KEYFRAMES</span><div><button type="button" id="inspector-prev-key" title="Previous keyframe">◂◆</button><button type="button" id="inspector-next-key" title="Next keyframe">◆▸</button></div>';
+  controlsColumn.appendChild(keyNav);
+  keyNav.querySelector('#inspector-prev-key').addEventListener('click', () => navigateKeyframe(-1));
+  keyNav.querySelector('#inspector-next-key').addEventListener('click', () => navigateKeyframe(1));
 
   if (node && clip) {
     const start = clipStartFrame(clip.id), local = localFrameFor(clip);
@@ -368,14 +378,14 @@ function renderInspector() {
     deleteButton.addEventListener('click', () => { pushUndo('Delete joint'); deleteNode(clip, node.id); app.renderAll(); });
     const selectTool = document.createElement('button'); selectTool.className = 'small-action'; selectTool.textContent = 'Node tool (N)'; selectTool.addEventListener('click', () => { app.project.activeTool = 'node'; app.renderAll(); });
     actionRow.append(deleteButton, selectTool); rigSection.appendChild(actionRow);
-    values.appendChild(rigSection);
+    controlsColumn.appendChild(rigSection);
   }
 
   if (clip && asset?.type === 'image') {
     const start = clipStartFrame(clip.id), localFrame = localFrameFor(clip);
     const transform = evaluateClipTransform(clip, localFrame);
     const section = document.createElement('section'); section.className = 'property-section';
-    section.innerHTML = '<h3>ARTWORK TRANSFORM</h3><p class="property-note">Move tool (M) moves this layer. Auto Key records edits at the playhead.</p>';
+    section.innerHTML = '<h3>ARTWORK TRANSFORM</h3>'; 
     const transformFields = [
       ['Position X', 'x', transform.x, '0.1'], ['Position Y', 'y', transform.y, '0.1'],
       ['Rotation', 'rotation', transform.rotation, '1'], ['Scale', 'scale', transform.scale, '0.01'], ['Opacity', 'opacity', transform.opacity, '0.01'],
@@ -397,37 +407,50 @@ function renderInspector() {
     }
     const rig = clip.rig;
     const rigInfo = document.createElement('section'); rigInfo.className = 'property-section';
-    rigInfo.innerHTML = `<h3>RIG</h3><div class="property-row"><label>Joints</label><span>${rig?.nodes?.length ?? 0}</span><span></span></div><div class="property-row"><label>Limbs</label><span>${rig?.bones?.length ?? 0}</span><span></span></div><p class="property-note">Rig (R): drag from a point to create a limb; Shift-drag to connect to another point. Node (N): edit joints only. Move (M): move the artwork only.</p>`;
-    values.appendChild(section);
-    // Keep the animation graph directly beneath Transform in the same Values view.
-    // Media remains a single top-level Inspector tab; the graph has no Media sub-tab.
-    renderGraphEditor(values, clip, node || null);
-    values.appendChild(rigInfo);
-    const hierarchy = rigHierarchySection(clip); if (hierarchy) values.appendChild(hierarchy);
+    rigInfo.innerHTML = `<h3>RIG</h3><div class="property-row"><label>Joints</label><span>${rig?.nodes?.length ?? 0}</span><span></span></div><div class="property-row"><label>Limbs</label><span>${rig?.bones?.length ?? 0}</span><span></span></div>`;
+    controlsColumn.append(section, rigInfo);
+    const hierarchy = rigHierarchySection(clip); if (hierarchy) controlsColumn.appendChild(hierarchy);
+    renderGraphEditor(graphColumn, clip, node || null);
   } else if (!node && asset) {
     const section = document.createElement('section'); section.className = 'property-section';
     section.innerHTML = `<h3>MEDIA DETAILS</h3><div class="media-detail">${asset.type === 'image' ? `<img src="${asset.dataUrl}" alt="">` : '<div class="media-thumb">♫</div>'}<div><strong></strong><span></span></div></div>`;
     section.querySelector('strong').textContent = asset.name;
     section.querySelector('span').textContent = asset.type === 'image' ? `${asset.width} × ${asset.height} px` : `${asset.duration?.toFixed(1) ?? '—'} seconds`;
-    values.appendChild(section);
-    if (asset.type === 'image') {
-      const hint = document.createElement('p'); hint.className = 'property-note'; hint.textContent = 'Drag this image from Media onto V1 to add it to the sequence.'; values.appendChild(hint);
-    }
+    controlsColumn.appendChild(section);
+    graphColumn.innerHTML = '<div class="graph-empty">Select a timeline clip to edit animation curves.</div>';
   } else if (!node && !asset) {
-    values.innerHTML = '<div class="inspector-empty">Select a clip or joint to edit its values. Switch to Media to import and organize files.</div>';
+    controlsColumn.innerHTML += '<div class="inspector-empty">Select an artwork layer or joint.</div>'; graphColumn.innerHTML = '<div class="graph-empty">Animation curves appear here.</div>';
   }
 
   media.innerHTML = '';
-  if (!asset) { media.innerHTML = '<div class="inspector-empty">Select a media item to see its source details.</div>'; }
+  if (!asset) { media.innerHTML = '<div class="inspector-empty">No media selected.</div>'; }
   else {
     const section = document.createElement('section'); section.className = 'property-section';
     section.innerHTML = `<h3>MEDIA SOURCE</h3><div class="media-detail">${asset.type === 'image' ? `<img src="${asset.dataUrl}" alt="">` : '<div class="media-thumb">♫</div>'}<div><strong></strong><span></span></div></div>`;
     section.querySelector('strong').textContent = asset.name;
     section.querySelector('span').textContent = `${asset.mime} · ${asset.type === 'image' ? `${asset.width} × ${asset.height}` : `${asset.duration?.toFixed(1) ?? '—'} sec`}`;
     media.appendChild(section);
-    const hint = document.createElement('p'); hint.className = 'property-note'; hint.textContent = asset.type === 'image' ? 'Drag to V1, or to the temporary +V2 / +V3 layer target while dragging.' : 'Drag to A1, or to the temporary +A2 / +A3 layer target while dragging.';
-    media.appendChild(hint);
+
   }
+}
+
+function navigateKeyframe(direction) {
+  const clip = findClip(app.project.selectedClipId) || getActiveClip()?.clip;
+  if (!clip) { window.jupiterToast('Select an animated clip first.'); return; }
+  const start = clipStartFrame(clip.id);
+  let frames = [];
+  const selectedNode = clip.rig?.nodes.find(item => item.id === app.project.selectedNodeId);
+  if (selectedNode) frames = (selectedNode.keys || []).map(key => key.frame);
+  else {
+    for (const property of TRANSFORM_PROPERTIES) {
+      frames.push(...(clip.transform?.keys?.[property] || []).map(key => key.frame));
+    }
+  }
+  frames = [...new Set(frames)].sort((a, b) => a - b);
+  const local = Math.max(0, app.project.currentFrame - start);
+  const next = direction < 0 ? frames.filter(frame => frame < local).at(-1) : frames.find(frame => frame > local);
+  if (next == null) { window.jupiterToast(direction < 0 ? 'No previous keyframe.' : 'No next keyframe.'); return; }
+  seekFrame(start + next);
 }
 
 function renderToolbar() {
@@ -437,8 +460,6 @@ function renderToolbar() {
   $('#stage-mode-label').textContent = ({ select: 'SELECT · ARTWORK OR JOINT', move: 'MOVE · ARTWORK ONLY', rig: 'RIG · DRAW BONES', node: 'NODE · JOINTS ONLY' })[app.project.activeTool] || 'SELECT';
   $('#undo-button').disabled = !app.history.length;
   $('#redo-button').disabled = !app.future.length;
-  $('#auto-key-toggle').classList.toggle('active', app.project.autoKey !== false);
-  $('#auto-key-toggle').setAttribute('aria-pressed', String(app.project.autoKey !== false));
 }
 
 function renderAll() {
@@ -448,7 +469,6 @@ function renderAll() {
   $$('[data-inspector-tab]').forEach(button => button.classList.toggle('active', button.dataset.inspectorTab === tab));
   $('#inspector-values').classList.toggle('hidden', tab !== 'values');
   $('#inspector-media').classList.toggle('hidden', tab !== 'media');
-  $('#auto-key-toggle').classList.toggle('active', app.project.autoKey !== false);
 }
 
 function addKeyframeAtPlayhead() {
@@ -550,7 +570,7 @@ async function saveProject(saveAs = false) {
 function validateProject(data) {
   if (!data || typeof data !== 'object' || !Array.isArray(data.assets) || !Array.isArray(data.tracks) || !Array.isArray(data.clips)) throw new Error('This file is not a valid Jupiter project.');
   data.fps = Number(data.fps) || 24;
-  data.autoKey = data.autoKey !== false;
+  data.autoKey = true;
   data.tracks.forEach(track => { track.clipIds ??= []; });
   const counts = { video: 0, audio: 0 };
   const normalizedTracks = [];
@@ -645,22 +665,16 @@ function toggleTools() {
 
 // Tool selection.
 $$('[data-tool]').forEach(button => button.addEventListener('click', () => setTool(button.dataset.tool)));
-$('#import-png-button').addEventListener('click', () => $('#png-input').click());
-$('#empty-import').addEventListener('click', () => $('#png-input').click());
-$('#media-import-button').addEventListener('click', () => { $('#media-input').click(); });
 $('#undo-button').addEventListener('click', () => undo());
 $('#redo-button').addEventListener('click', () => redo());
-$('#fit-stage').addEventListener('click', () => { app.project.viewZoom = 1; app.project.viewPan = { x: 0, y: 0 }; $('#zoom-label').textContent = '100%'; refreshStage(); });
 $('#zoom-in').addEventListener('click', () => { app.project.viewZoom = Math.min(5, app.project.viewZoom * 1.15); $('#zoom-label').textContent = `${Math.round(app.project.viewZoom * 100)}%`; refreshStage(); });
 $('#zoom-out').addEventListener('click', () => { app.project.viewZoom = Math.max(.15, app.project.viewZoom / 1.15); $('#zoom-label').textContent = `${Math.round(app.project.viewZoom * 100)}%`; refreshStage(); });
 $('#timeline-zoom-in').addEventListener('click', () => zoomTimeline(1));
 $('#timeline-zoom-out').addEventListener('click', () => zoomTimeline(-1));
-$('#auto-key-toggle').addEventListener('click', () => { app.project.autoKey = app.project.autoKey === false; renderToolbar(); window.jupiterToast(`Auto Key ${app.project.autoKey ? 'on' : 'off'}.`); });
 $('#play-button').addEventListener('click', playPlayback);
 $('#stop-button').addEventListener('click', () => { pausePlayback(); seekFrame(0); });
 $('#go-start').addEventListener('click', () => seekFrame(0));
 $('#go-end').addEventListener('click', () => seekFrame(getSequenceDuration() - 1));
-$('#keyframe-button').addEventListener('click', addKeyframeAtPlayhead);
 $('#step-back').addEventListener('click', () => seekFrame(app.project.currentFrame - 1));
 $('#step-forward').addEventListener('click', () => seekFrame(app.project.currentFrame + 1));
 $('#fps-select').addEventListener('change', event => { pushUndo('Change frame rate'); const old = app.project.fps; app.project.fps = Number(event.target.value); for (const clip of app.project.clips) clip.durationFrames = Math.max(1, Math.round(clip.durationFrames * app.project.fps / old)); app.renderAll(); });
@@ -679,28 +693,16 @@ $('#inspector-collapse').addEventListener('click', () => toggleInspector());
 $('#toggle-inspector').addEventListener('click', () => toggleInspector());
 $('#toggle-tools').addEventListener('click', () => toggleTools());
 $('#toggle-timeline').addEventListener('click', () => { const collapsed = $('#bottom-dock').classList.toggle('timeline-collapsed'); $('#app-shell').classList.toggle('timeline-collapsed', collapsed); $('#toggle-timeline').textContent = collapsed ? '⌃' : '⌄'; });
-async function runWindowAction(action, label) {
-  if (!tauriMode) {
-    window.jupiterToast(`${label} is available in the desktop build.`);
-    return;
-  }
-  try {
-    await action();
-  } catch (error) {
-    window.jupiterToast(`Couldn't ${label.toLowerCase()}: ${String(error).slice(0, 120)}`);
-  }
-}
-
-$('#window-minimize').addEventListener('click', () => runWindowAction(() => getCurrentWindow().minimize(), 'Minimize'));
-$('#window-maximize').addEventListener('click', () => runWindowAction(() => getCurrentWindow().toggleMaximize(), 'Maximize / restore'));
-$('#window-close').addEventListener('click', () => runWindowAction(() => getCurrentWindow().close(), 'Close'));
+$('#window-minimize').addEventListener('click', () => { if (tauriMode) getCurrentWindow().minimize().catch(error => window.jupiterToast(`Minimize failed: ${error}`)); });
+$('#window-maximize').addEventListener('click', () => { if (tauriMode) getCurrentWindow().toggleMaximize().catch(error => window.jupiterToast(`Maximize failed: ${error}`)); else window.jupiterToast('Window controls are available in the desktop app.'); });
+$('#window-close').addEventListener('click', () => { if (tauriMode) getCurrentWindow().close().catch(error => window.jupiterToast(`Close failed: ${error}`)); else window.jupiterToast('Close this browser tab to exit.'); });
 $('.titlebar').addEventListener('pointerdown', event => {
   if (!tauriMode || event.button !== 0 || event.target.closest('button, input, select, a')) return;
-  runWindowAction(() => getCurrentWindow().startDragging(), 'Drag window');
+  getCurrentWindow().startDragging().catch(() => {});
 });
 $('.titlebar').addEventListener('dblclick', event => {
   if (!tauriMode || event.target.closest('button, input, select, a')) return;
-  runWindowAction(() => getCurrentWindow().toggleMaximize(), 'Maximize / restore');
+  getCurrentWindow().toggleMaximize().catch(() => {});
 });
 $('#project-name').addEventListener('dblclick', () => { const name = prompt('Project name', app.project.name); if (name?.trim()) { pushUndo('Rename project'); setProjectName(name.trim()); } });
 
@@ -708,6 +710,25 @@ $('#png-input').addEventListener('change', event => { importFiles(event.target.f
 $('#media-input').addEventListener('change', event => { importFiles(event.target.files); event.target.value = ''; });
 $('#audio-input').addEventListener('change', event => { importFiles(event.target.files); event.target.value = ''; });
 $('#project-input').addEventListener('change', event => { if (event.target.files?.[0]) openProjectFromFile(event.target.files[0]); event.target.value = ''; });
+
+// Media is the single import surface: double-click or right-click its empty area,
+// or drop files directly into the panel. Existing cards still double-click to append.
+const mediaPanel = $('#inspector-media');
+mediaPanel.addEventListener('dblclick', event => {
+  if (!event.target.closest('.media-card')) $('#media-input').click();
+});
+mediaPanel.addEventListener('contextmenu', event => {
+  event.preventDefault(); $('#media-input').click();
+});
+mediaPanel.addEventListener('dragover', event => {
+  if (event.dataTransfer?.types?.includes('Files')) { event.preventDefault(); mediaPanel.classList.add('media-drop-active'); }
+});
+mediaPanel.addEventListener('dragleave', event => {
+  if (!mediaPanel.contains(event.relatedTarget)) mediaPanel.classList.remove('media-drop-active');
+});
+mediaPanel.addEventListener('drop', event => {
+  if (event.dataTransfer?.files?.length) { event.preventDefault(); event.stopPropagation(); mediaPanel.classList.remove('media-drop-active'); importFiles(event.dataTransfer.files, false); }
+});
 
 const timelineBody = $('#timeline-body');
 timelineBody.addEventListener('dragover', event => {
@@ -769,34 +790,5 @@ if (tauriMode) {
   } catch (error) { console.warn('Native drop integration unavailable', error); }
 }
 
-async function initializeLiquidGlass() {
-  // Keep the upstream library's WebGL blur/refraction as a restrained white
-  // frosting pass only. The CSS surface is the offline/WebGL fallback.
-  try {
-    if (typeof Container === 'undefined' || typeof html2canvas === 'undefined') return;
-    window.glassControls = {
-      edgeIntensity: .001, rimIntensity: .001, baseIntensity: .001,
-      edgeDistance: .18, rimDistance: .8, baseDistance: .12,
-      cornerBoost: .001, rippleEffect: .0001, blurRadius: 7,
-    };
-    const panels = ['.inspector', '.bottom-dock', '.commandbar', '.tool-rail'];
-    for (const selector of panels) {
-      const panel = $(selector); if (!panel || panel.dataset.liquidEnhanced) continue;
-      const overlay = new Container({ borderRadius: 9, tintOpacity: .22 });
-      overlay.element.style.position = 'absolute'; overlay.element.style.inset = '0';
-      overlay.element.style.width = '100%'; overlay.element.style.height = '100%';
-      overlay.element.style.padding = '0'; overlay.element.style.gap = '0';
-      overlay.element.style.pointerEvents = 'none'; overlay.element.style.zIndex = '0';
-      overlay.canvas.style.zIndex = '0'; overlay.canvas.style.boxShadow = 'none';
-      panel.prepend(overlay.element);
-      for (const child of [...panel.children]) if (child !== overlay.element) {
-        child.style.position ||= 'relative'; child.style.zIndex = '1';
-      }
-      panel.dataset.liquidEnhanced = 'true';
-      const observer = new ResizeObserver(() => overlay.updateSizeFromDOM()); observer.observe(panel);
-    }
-  } catch (error) { console.info('White frost CSS fallback remains active.', error); }
-}
-
 renderAll();
-setTimeout(initializeLiquidGlass, 450);
+

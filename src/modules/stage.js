@@ -357,7 +357,7 @@ function onPointerDown(event) {
   if (!active) {
     if (app.project.activeTool === 'select') {
       app.project.selectedClipId = null; app.project.selectedAssetId = null; app.project.selectedNodeId = null;
-      app.renderAll();
+      app.project.inspectorTab = 'values'; app.renderAll();
     }
     return;
   }
@@ -373,6 +373,7 @@ function onPointerDown(event) {
     app.project.selectedClipId = active.clip.id;
     app.project.selectedAssetId = active.asset.id;
     app.project.selectedNodeId = hit.id;
+    app.project.inspectorTab = 'values';
     pointerState = { type: 'move-node', pointerId: event.pointerId, nodeId: hit.id, clipId: active.clip.id, startFrame: active.startFrame };
     app.renderInspector(); requestDraw(); return;
   }
@@ -383,6 +384,7 @@ function onPointerDown(event) {
     app.project.selectedClipId = active.clip.id;
     app.project.selectedAssetId = active.asset.id;
     app.project.selectedNodeId = null;
+    app.project.inspectorTab = 'values';
     pushUndo('Move artwork');
     pointerState = {
       type: 'move-layer', pointerId: event.pointerId, clipId: active.clip.id,
@@ -408,6 +410,7 @@ function onPointerDown(event) {
     }
     app.project.selectedClipId = active.clip.id;
     app.project.selectedAssetId = active.asset.id;
+    app.project.inspectorTab = 'values';
     app.renderInspector(); requestDraw(); return;
   }
 
@@ -417,10 +420,12 @@ function onPointerDown(event) {
       app.project.selectedClipId = active.clip.id;
       app.project.selectedAssetId = active.asset.id;
       app.project.selectedNodeId = hit.id;
+      app.project.inspectorTab = 'values';
     } else if (onImage) {
       app.project.selectedClipId = active.clip.id;
       app.project.selectedAssetId = active.asset.id;
       app.project.selectedNodeId = null;
+      app.project.inspectorTab = 'values';
     } else return;
     app.renderInspector(); app.renderTimeline(); requestDraw();
   }

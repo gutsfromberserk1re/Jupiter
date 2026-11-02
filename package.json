@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",
-    "test": "node --test"
+    "test": "node --test",
+    "check": "node --check src/main.js && node --check src/modules/stage.js && node --check src/modules/rig.js && node --check src/modules/timeline.js"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

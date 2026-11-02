@@ -9,7 +9,7 @@ const createTrack = (type, index) => ({
   clipIds: [],
 });
 
-export function createProject(name = 'Untitled') {
+export function createProject(name = 'Untitled Project') {
   return {
     schemaVersion: 2,
     name,
@@ -31,6 +31,7 @@ export function createProject(name = 'Untitled') {
     timelineZoom: 3.2,
     viewZoom: 1,
     viewPan: { x: 0, y: 0 },
+    inspectorTab: 'values',
     graphProperty: 'x',
     lastProjectPath: null,
   };
@@ -161,6 +162,7 @@ export function addClip(assetId, trackId = null) {
   track.clipIds.push(clip.id);
   app.project.selectedClipId = clip.id;
   app.project.selectedAssetId = assetId;
+  app.project.inspectorTab = 'values';
   app.project.selectedNodeId = null;
   app.project.currentFrame = Math.max(0, getTrackDuration(track) - clip.durationFrames);
   app.renderAll();

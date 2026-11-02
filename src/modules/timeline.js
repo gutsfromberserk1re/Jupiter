@@ -108,7 +108,7 @@ function createGhostLane(type) {
   const count = getTracks(type).length;
   if (count >= 3) return null;
   const lane = document.createElement('div');
-  lane.className = `new-layer-drop ${type}`;
+  lane.className = `new-layer-drop ${type} available`;
   lane.dataset.createTrack = type;
   lane.dataset.createTrackCode = `${type === 'video' ? 'V' : 'A'}${count + 1}`;
   lane.textContent = type === 'video' ? `Drop image here to create V${count + 1}` : `Drop audio here to create A${count + 1}`;
@@ -144,6 +144,7 @@ function keyMarkersForClip(clip, clipElement, ppf) {
       const start = clipStartFrame(clip.id);
       seek(start + marker.frame);
       app.project.selectedClipId = clip.id;
+      app.project.inspectorTab = 'values';
       app.project.selectedNodeId = marker.nodeId || null;
       app.project.graphProperty = marker.kind === 'node' ? 'node-x' : marker.property;
       app.renderInspector();
@@ -185,6 +186,7 @@ function renderTrack(track, ppf) {
       app.project.selectedClipId = clip.id;
       app.project.selectedAssetId = asset.id;
       app.project.selectedNodeId = null;
+      app.project.inspectorTab = 'values';
       const rect = content.getBoundingClientRect();
       seek(Math.round((event.clientX - rect.left) / ppf));
       app.renderAll();
@@ -203,8 +205,8 @@ function renderTrackRows() {
   const video = getTracks('video').sort(videoOrder);
   const audio = getTracks('audio').sort(audioOrder);
   const videoGhost = createGhostLane('video');
-  for (const track of video) renderTrack(track, ppf);
   if (videoGhost) { const spacer = document.createElement('div'); spacer.className = 'new-layer-label video'; labels.appendChild(spacer); lanes.appendChild(videoGhost); }
+  for (const track of video) renderTrack(track, ppf);
   for (const track of audio) renderTrack(track, ppf);
   const audioGhost = createGhostLane('audio');
   if (audioGhost) { const spacer = document.createElement('div'); spacer.className = 'new-layer-label audio'; labels.appendChild(spacer); lanes.appendChild(audioGhost); }
@@ -284,6 +286,7 @@ function finishClipDrag(event) {
   app.project.currentFrame = clipStartFrame(clip.id);
   app.project.selectedClipId = clip.id;
   app.project.selectedAssetId = clip.assetId;
+  app.project.inspectorTab = 'values';
   app.renderAll();
 }
 
@@ -314,6 +317,7 @@ function onKeyPointerDown(event) {
   app.project.selectedClipId = clip.id;
   app.project.selectedNodeId = keyDrag.nodeId;
   app.project.selectedAssetId = clip.assetId;
+  app.project.inspectorTab = 'values';
   app.project.graphProperty = keyDrag.keyKind === 'node' ? 'node-x' : keyDrag.property;
   app.renderInspector();
 }
@@ -336,6 +340,7 @@ function finishKeyDrag(event) {
   state.key.frame = Math.max(0, Math.min(clip.durationFrames - 1, Math.round(frameFromEvent(event) - clipStartFrame(clip.id))));
   deduplicateKeys(state.keyArray, state.key);
   app.project.currentFrame = clipStartFrame(clip.id) + state.key.frame;
+  app.project.inspectorTab = 'values';
   app.renderAll();
 }
 
@@ -412,6 +417,7 @@ export function handleTimelineDrop(assetId, clientX, clientY = null) {
   app.project.selectedClipId = clip.id;
   app.project.selectedAssetId = asset.id;
   app.project.selectedNodeId = null;
+  app.project.inspectorTab = 'values';
   app.project.currentFrame = clipStartFrame(clip.id);
   setAssetDragState(null, false);
   app.renderAll();
