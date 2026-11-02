@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f2f4f6" />
+  <title>Jupiter · 2D Animation Studio</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div id="app-shell">
+    <header class="titlebar frosted-panel" id="titlebar">
+      <div class="brand-zone">
+        <button class="brand-orb" id="project-menu-button" title="Jupiter menu" aria-label="Open project menu"><span>J</span></button>
+        <div class="brand-copy" data-tauri-drag-region>
+          <strong>JUPITER</strong>
+          <span>2D ANIMATION STUDIO</span>
+        </div>
+        <span class="title-divider"></span>
+        <span class="project-name" id="project-name" data-tauri-drag-region>Untitled</span>
+      </div>
+      <div class="window-controls" aria-label="Window controls">
+        <button class="window-dot maximize" id="window-maximize" title="Maximize" aria-label="Maximize"></button>
+        <button class="window-dot minimize" id="window-minimize" title="Minimize" aria-label="Minimize"></button>
+        <button class="window-dot close" id="window-close" title="Close" aria-label="Close"></button>
+      </div>
+    </header>
+
+    <div class="commandbar frosted-panel">
+      <div class="command-group">
+        <button class="command-button primary" id="import-png-button" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg>
+          Import PNG
+        </button>
+        <span class="command-divider"></span>
+        <button class="command-button square" id="undo-button" title="Undo · Ctrl+Z" aria-label="Undo" disabled>↶</button>
+        <button class="command-button square" id="redo-button" title="Redo · Ctrl+Y" aria-label="Redo" disabled>↷</button>
+      </div>
+      <div class="command-center">
+        <span id="sequence-name">Untitled sequence</span>
+        <span class="command-meta">2D · <span id="tool-status" class="sr-only">SELECT</span> <span id="canvas-resolution">24 FPS</span></span>
+      </div>
+      <div class="command-spacer"></div>
+    </div>
+
+    <main class="editor-layout" id="editor-layout">
+      <nav class="tool-rail frosted-panel" role="toolbar" aria-label="Editing tools">
+        <button class="tool-button active" data-tool="select" title="Select (V)" aria-label="Select tool" aria-pressed="true">
+          <svg class="tool-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3 18.5 13 11.8 14.2 9.1 20.5Z"/><path d="m13 15 5 6"/></svg>
+          <span>Select</span><kbd>V</kbd>
+        </button>
+        <button class="tool-button" data-tool="move" title="Move artwork (M)" aria-label="Move tool" aria-pressed="false">
+          <svg class="tool-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M2 12h20M12 2 8.7 5.3M12 2l3.3 3.3M22 12l-3.3-3.3M22 12l-3.3 3.3M12 22l-3.3-3.3M12 22l3.3-3.3M2 12l3.3-3.3M2 12l3.3 3.3"/></svg>
+          <span>Move</span><kbd>M</kbd>
+        </button>
+        <span class="rail-divider"></span>
+        <button class="tool-button" data-tool="rig" title="Rig (R)" aria-label="Rig tool" aria-pressed="false">
+          <svg class="tool-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 7-8 8-8"/><circle cx="4" cy="20" r="2.2"/><circle cx="11" cy="12" r="2.2"/><circle cx="19" cy="4" r="2.2"/></svg>
+          <span>Rig</span><kbd>R</kbd>
+        </button>
+        <button class="tool-button" data-tool="node" title="Node (N)" aria-label="Node tool" aria-pressed="false">
+          <svg class="tool-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 19 7-7 9-8"/><circle cx="4" cy="19" r="2.7"/><circle cx="11" cy="12" r="2"/><circle cx="20" cy="4" r="2.7"/></svg>
+          <span>Node</span><kbd>N</kbd>
+        </button>
+      </nav>
+
+      <section class="stage-area" id="stage-area">
+        <div class="stage-topline">
+          <div class="stage-top-leading">
+            <button class="icon-button panel-peek" id="toggle-tools" title="Collapse tools" aria-label="Collapse tools">‹</button>
+            <div class="breadcrumb"><span>CANVAS</span><i>/</i><strong id="stage-mode-label">SELECT · ARTWORK</strong></div>
+          </div>
+          <div class="stage-top-actions">
+            <span id="canvas-info">TRANSPARENT CANVAS</span>
+            <button class="icon-button" id="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
+            <span class="zoom-label" id="zoom-label">100%</span>
+            <button class="icon-button" id="zoom-in" title="Zoom in" aria-label="Zoom in">＋</button>
+            <button class="icon-button panel-peek" id="toggle-inspector" title="Collapse right panel" aria-label="Collapse right panel">›</button>
+          </div>
+        </div>
+        <div class="canvas-wrap" id="canvas-wrap">
+          <canvas id="stage-canvas" aria-label="2D animation canvas"></canvas>
+          <div class="stage-empty" id="stage-empty">
+            <div class="empty-art-icon" aria-hidden="true">
+              <svg viewBox="0 0 48 48"><rect x="6" y="6" width="36" height="36" rx="5"/><circle cx="17" cy="18" r="3"/><path d="M8 36 20 24l7 7 6-6 7 8"/></svg>
+            </div>
+            <strong>Start with an image</strong>
+            <p>Drop a PNG onto the canvas or import it to begin rigging.</p>
+            <button class="command-button primary" id="empty-import" type="button">Import image</button>
+          </div>
+          <div class="canvas-hud"><span>PREVIEW</span><span>RIG: DRAG FROM A JOINT · SHIFT: CONNECT · NODE: EDIT JOINTS</span></div>
+        </div>
+      </section>
+
+      <aside class="right-sidebar" id="right-sidebar" aria-label="Inspector and Media">
+        <section class="inspector frosted-panel" id="inspector-panel">
+          <div class="panel-heading">
+            <div><span class="eyebrow">PROPERTIES</span><h2>Values</h2></div>
+            <button class="icon-button subtle" id="inspector-collapse" title="Collapse Inspector content" aria-label="Collapse Inspector content">⌃</button>
+          </div>
+          <div class="inspector-scroll" id="inspector-scroll">
+            <div class="inspector-body" id="inspector-values"></div>
+          </div>
+        </section>
+
+        <section class="media-panel frosted-panel" id="media-panel">
+          <div class="panel-heading media-heading">
+            <div><span class="eyebrow">PROJECT LIBRARY</span><h2>Media <span id="media-count" class="count-badge">0</span></h2></div>
+            <div class="heading-actions">
+              <button class="icon-button" id="media-import-button" title="Import media" aria-label="Import media">＋</button>
+              <button class="icon-button subtle" id="media-collapse" title="Collapse Media" aria-label="Collapse Media">⌄</button>
+            </div>
+          </div>
+          <div class="media-filter"><span>Imported assets</span><span class="media-filter-note">DRAG TO TIMELINE</span></div>
+          <div class="media-list" id="media-list"><div class="media-empty">Your images and audio will appear here.</div></div>
+        </section>
+      </aside>
+    </main>
+
+    <section class="bottom-dock frosted-panel" id="bottom-dock" aria-label="Timeline">
+      <div class="timeline-toolbar">
+        <div class="timeline-title"><span class="eyebrow">SEQUENCE</span><strong>Timeline</strong><span class="fps-label" id="sequence-info">24 FPS · 00:00</span></div>
+        <div class="transport">
+          <button class="transport-button" id="go-start" title="Go to start" aria-label="Go to start">|◀</button>
+          <button class="transport-button" id="step-back" title="Previous frame" aria-label="Previous frame">◀</button>
+          <button class="transport-button play" id="play-button" title="Play / Pause · Space" aria-label="Play or pause">▶</button>
+          <button class="transport-button" id="stop-button" title="Stop" aria-label="Stop">■</button>
+          <button class="transport-button" id="step-forward" title="Next frame" aria-label="Next frame">▶|</button>
+          <button class="transport-button" id="go-end" title="Go to end" aria-label="Go to end">▶▶</button>
+        </div>
+        <button class="keyframe-add" id="keyframe-button" title="Add keyframe at playhead">◆ Add key</button>
+        <button class="auto-key-toggle active" id="auto-key-toggle" title="Auto Key on/off" aria-pressed="true"><span class="auto-key-dot"></span> Auto Key</button>
+        <div class="timeline-options">
+          <label>FPS <select id="fps-select"><option>12</option><option selected>24</option><option>25</option><option>30</option><option>60</option></select></label>
+          <button class="icon-button" id="timeline-zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
+          <button class="icon-button" id="timeline-zoom-in" title="Zoom in" aria-label="Zoom in">＋</button>
+          <button class="icon-button subtle" id="toggle-timeline" title="Collapse timeline" aria-label="Collapse timeline">⌄</button>
+        </div>
+      </div>
+      <div class="timeline-body" id="timeline-body">
+        <div class="timeline-label-column" id="timeline-labels"></div>
+        <div class="timeline-scroll" id="timeline-scroll">
+          <div class="timeline-content" id="timeline-content">
+            <div class="timeline-ruler" id="timeline-ruler"></div>
+            <div class="timeline-lanes" id="timeline-lanes"></div>
+            <div class="playhead-line" id="playhead-line"><div class="playhead-cap"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="timeline-status"><span id="playhead-time">00:00:00:00</span><span id="timeline-hint">Drop images on V1 · Drop audio on A1 · Clips snap together magnetically</span><span id="frame-label">F 0000</span></div>
+    </section>
+  </div>
+
+  <div class="context-menu frosted-panel hidden" id="project-menu">
+    <div class="menu-brand"><span class="brand-orb small">J</span><div><strong>Jupiter</strong><small>2D Animation Studio</small></div></div>
+    <button data-action="new-project"><span>New project</span><kbd>Ctrl+N</kbd></button>
+    <button data-action="open-project"><span>Open project…</span><kbd>Ctrl+O</kbd></button>
+    <button data-action="save-project"><span>Save project</span><kbd>Ctrl+S</kbd></button>
+    <button data-action="save-as"><span>Save project as…</span></button>
+    <div class="menu-separator"></div>
+    <button data-action="import-png"><span>Import PNG…</span></button>
+    <button data-action="import-audio"><span>Import audio…</span></button>
+    <div class="menu-separator"></div>
+    <button data-action="close-project"><span>Close project</span></button>
+    <button data-action="exit"><span>Exit</span></button>
+  </div>
+
+  <div class="toast-region" id="toast-region" aria-live="polite"></div>
+  <input id="png-input" type="file" accept="image/png,image/webp,image/jpeg" multiple hidden />
+  <input id="media-input" type="file" accept="image/*,audio/*" multiple hidden />
+  <input id="audio-input" type="file" accept="audio/*" multiple hidden />
+  <input id="project-input" type="file" accept=".jupiter,.json,application/json" hidden />
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
