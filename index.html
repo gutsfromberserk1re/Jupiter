@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07111e" />
+    <title>Jupiter Animator</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/dashersw/liquid-glass-js@78cb6ccb0b9987bb60a88b14ccbd13a9e6e8ab2a/glass.css" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/gh/dashersw/liquid-glass-js@78cb6ccb0b9987bb60a88b14ccbd13a9e6e8ab2a/container.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/gh/dashersw/liquid-glass-js@78cb6ccb0b9987bb60a88b14ccbd13a9e6e8ab2a/button.js" defer></script>
+  </head>
+  <body>
+    <div id="app-shell">
+      <header class="titlebar glass-panel" id="titlebar">
+        <div class="brand-zone">
+          <button class="brand-orb" id="project-menu-button" title="Jupiter menu" aria-label="Open project menu"><span>J</span></button>
+          <div class="brand-copy" data-tauri-drag-region><strong>JUPITER</strong><span>2D ANIMATION STUDIO</span></div>
+          <span class="project-name" id="project-name" data-tauri-drag-region>Untitled</span>
+        </div>
+        <div class="window-controls">
+          <button class="window-dot maximize" id="window-maximize" title="Maximize" aria-label="Maximize"></button>
+          <button class="window-dot minimize" id="window-minimize" title="Minimize" aria-label="Minimize"></button>
+          <button class="window-dot close" id="window-close" title="Close" aria-label="Close"></button>
+        </div>
+      </header>
+
+      <div class="commandbar glass-panel">
+        <button class="command-button" id="import-png-button"><span class="mini-icon">＋</span> Import PNG</button>
+        <button class="command-button" id="undo-button" title="Undo · Ctrl+Z" disabled>↶</button>
+        <button class="command-button" id="redo-button" title="Redo · Ctrl+Y" disabled>↷</button>
+        <div class="command-spacer"></div>
+        <span class="status-chip" id="tool-status">SELECT MODE</span>
+        <button class="command-button primary" id="fit-stage">Fit canvas</button>
+      </div>
+
+      <main class="editor-layout">
+        <section class="stage-area" id="stage-area">
+          <div class="stage-topline">
+            <div class="breadcrumb"><span>CANVAS</span><i>/</i><strong id="stage-mode-label">SELECT · IMAGE</strong></div>
+            <div class="stage-top-actions"><span id="zoom-label">100%</span><button class="icon-button" id="zoom-out" title="Zoom out">−</button><button class="icon-button" id="zoom-in" title="Zoom in">＋</button></div>
+          </div>
+          <div class="canvas-wrap" id="canvas-wrap">
+            <div class="tool-rail glass-panel" role="toolbar" aria-label="Editing tools">
+              <button class="tool-button active" data-tool="select" title="Select (V)"><svg class="tool-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3L18.5 13.2L11.8 14.2L9.1 20.5Z"/><path d="M13 15L18 21"/></svg><span>Select</span><kbd>V</kbd></button>
+              <button class="tool-button" data-tool="rig" title="Rig (R)"><svg class="tool-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19L11 12L18.5 5.5"/><circle cx="5" cy="19" r="2.3"/><circle cx="11" cy="12" r="2.3"/><circle cx="18.5" cy="5.5" r="2.3"/></svg><span>Rig</span><kbd>R</kbd></button>
+              <button class="tool-button" data-tool="node" title="Node (N)"><svg class="tool-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18L11 12L19 5"/><circle cx="5" cy="18" r="3"/><circle cx="11" cy="12" r="2.2"/><circle cx="19" cy="5" r="3"/></svg><span>Node</span><kbd>N</kbd></button>
+            </div>
+            <canvas id="stage-canvas" aria-label="Animation preview canvas"></canvas>
+            <div class="stage-empty" id="stage-empty">
+              <div class="empty-orbit"><span></span><span></span><span></span></div>
+              <strong>Bring your artwork to life</strong>
+              <p>Drop a PNG here or import one to start rigging.</p>
+              <button class="command-button primary" id="empty-import">Import an image</button>
+            </div>
+            <div class="canvas-footer"><span id="canvas-info">TRANSPARENT CANVAS</span><span>DRAG JOINTS · SHIFT TO CONNECT</span></div>
+          </div>
+          <button class="collapse-handle right" id="toggle-inspector" title="Collapse inspector">›</button>
+        </section>
+
+        <aside class="inspector glass-panel" id="inspector-panel">
+          <div class="panel-heading"><div><span class="eyebrow">PROPERTIES</span><h2>Inspector</h2></div><button class="icon-button subtle" id="inspector-collapse" title="Collapse inspector">›</button></div>
+          <div class="segmented-tabs"><button class="tab-button active" data-inspector-tab="values">Values</button><button class="tab-button" data-inspector-tab="media">Media</button></div>
+          <div class="inspector-body" id="inspector-values"></div>
+          <div class="inspector-body hidden" id="inspector-media"></div>
+        </aside>
+      </main>
+
+      <section class="bottom-dock glass-panel" id="bottom-dock">
+        <aside class="media-bin" id="media-panel">
+          <div class="panel-heading compact"><div><span class="eyebrow">PROJECT LIBRARY</span><h2>Media</h2></div><button class="icon-button" id="media-import-button" title="Import media">＋</button></div>
+          <div class="media-filter"><span>All media</span><span class="count-badge" id="media-count">0</span></div>
+          <div class="media-list" id="media-list"><div class="media-empty">Your imported PNGs and audio will appear here.</div></div>
+          <div class="media-footer"><button class="text-button" id="add-video-track">＋ Video track</button><button class="text-button" id="add-audio-track">＋ Audio track</button></div>
+          <button class="collapse-handle bottom-left" id="toggle-media" title="Collapse media panel">‹</button>
+        </aside>
+
+        <section class="timeline-panel" id="timeline-panel">
+          <div class="timeline-toolbar">
+            <div class="timeline-title"><span class="eyebrow">SEQUENCE</span><strong>Timeline</strong><span class="fps-label" id="sequence-info">24 FPS · 00:00</span></div>
+            <div class="transport">
+              <button class="transport-button" id="go-start" title="Go to start">|‹</button>
+              <button class="transport-button" id="step-back" title="Previous frame">‹</button>
+              <button class="transport-button play" id="play-button" title="Play / Pause · Space">▶</button>
+              <button class="transport-button" id="stop-button" title="Stop">■</button>
+              <button class="transport-button" id="step-forward" title="Next frame">›</button>
+              <button class="transport-button" id="go-end" title="Go to end">›|</button>
+            </div>
+            <button class="keyframe-add" id="keyframe-button" title="Add keyframe at playhead">◆ Key</button>
+            <span class="auto-key-indicator"><i></i> AUTO KEY</span>
+            <div class="timeline-options"><label>FPS <select id="fps-select"><option>12</option><option selected>24</option><option>25</option><option>30</option><option>60</option></select></label><button class="icon-button" id="timeline-zoom-out" title="Zoom out">−</button><button class="icon-button" id="timeline-zoom-in" title="Zoom in">＋</button><button class="icon-button subtle" id="toggle-timeline" title="Collapse timeline">⌄</button></div>
+          </div>
+          <div class="timeline-body" id="timeline-body">
+            <div class="timeline-label-column" id="timeline-labels"></div>
+            <div class="timeline-scroll" id="timeline-scroll">
+              <div class="timeline-content" id="timeline-content">
+                <div class="timeline-ruler" id="timeline-ruler"></div>
+                <div class="timeline-lanes" id="timeline-lanes"></div>
+                <div class="playhead-line" id="playhead-line"><div class="playhead-cap"></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="timeline-status"><span id="playhead-time">00:00:00:00</span><span id="timeline-hint">Drop media here · clips snap together magnetically</span><span id="frame-label">F 0000</span></div>
+        </section>
+      </section>
+    </div>
+
+    <div class="context-menu glass-panel hidden" id="project-menu">
+      <div class="menu-brand"><span class="brand-orb small">J</span><div><strong>Jupiter</strong><small>2D Animation Studio</small></div></div>
+      <button data-action="new-project"><span>New project</span><kbd>Ctrl+N</kbd></button>
+      <button data-action="open-project"><span>Open project…</span><kbd>Ctrl+O</kbd></button>
+      <button data-action="save-project"><span>Save project</span><kbd>Ctrl+S</kbd></button>
+      <button data-action="save-as"><span>Save project as…</span></button>
+      <div class="menu-separator"></div>
+      <button data-action="import-png"><span>Import PNG…</span></button>
+      <button data-action="import-audio"><span>Import audio…</span></button>
+      <div class="menu-separator"></div>
+      <button data-action="close-project"><span>Close project</span></button>
+      <button data-action="exit"><span>Exit</span></button>
+    </div>
+
+    <div class="toast-region" id="toast-region" aria-live="polite"></div>
+    <input id="png-input" type="file" accept="image/png,image/webp,image/jpeg" multiple hidden />
+    <input id="media-input" type="file" accept="image/*,audio/*" multiple hidden />
+    <input id="audio-input" type="file" accept="audio/*" multiple hidden />
+    <input id="project-input" type="file" accept=".jupiter,.json,application/json" hidden />
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
