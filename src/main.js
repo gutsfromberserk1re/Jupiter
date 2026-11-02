@@ -60,11 +60,11 @@ async function importFiles(fileList, autoInsert = false) {
       pushUndo('Import media');
       app.project.assets.push(asset);
       app.project.selectedAssetId = asset.id;
-      if (!autoInsert) { app.project.selectedClipId = null; app.project.selectedNodeId = null; }
       if (image) await loadImageAsset(asset);
       if (autoInsert) addClip(asset.id);
     } catch (error) { window.jupiterToast(`Couldn't import ${file.name}: ${error.message || error}`); }
   }
+  if (files.length) app.project.inspectorTab = autoInsert ? 'values' : 'media';
   app.renderAll();
 }
 
@@ -79,11 +79,11 @@ async function importNativePaths(paths, autoInsert = false) {
       const duration = type === 'audio' ? await audioDuration(dataUrl) : null;
       const asset = { id: makeId('asset'), name: assetData.name, type, mime: assetData.mime, dataUrl, width: metadata.width, height: metadata.height, duration };
       pushUndo('Import media'); app.project.assets.push(asset); app.project.selectedAssetId = asset.id;
-      if (!autoInsert) { app.project.selectedClipId = null; app.project.selectedNodeId = null; }
       if (type === 'image') await loadImageAsset(asset);
       if (autoInsert) addClip(asset.id);
     } catch (error) { window.jupiterToast(`Couldn't import file: ${String(error).slice(0, 120)}`); }
   }
+  if (paths.length) app.project.inspectorTab = autoInsert ? 'values' : 'media';
   app.renderAll();
 }
 
@@ -113,6 +113,9 @@ function renderMedia() {
       app.project.selectedAssetId = asset.id;
       app.project.selectedClipId = null;
       app.project.selectedNodeId = null;
+      app.project.inspectorTab = 'media';
+      $$('[data-inspector-tab]').forEach(button => button.classList.toggle('active', button.dataset.inspectorTab === 'media'));
+      $('#inspector-values').classList.add('hidden'); $('#inspector-media').classList.remove('hidden');
       app.renderInspector(); renderMedia();
     });
     card.addEventListener('dblclick', () => addClip(asset.id));
@@ -224,7 +227,7 @@ function renderGraphEditor(parent, clip, node) {
   if (!clip) return;
   const section = document.createElement('section'); section.className = 'graph-editor';
   const heading = document.createElement('div'); heading.className = 'graph-heading';
-  const title = document.createElement('strong'); title.textContent = 'VALUE GRAPH';
+  const title = document.createElement('strong'); title.textContent = 'GRAPH';
   const property = document.createElement('select'); property.id = 'graph-property';
   const graphOptions = node
     ? [['node-x', 'Joint X'], ['node-y', 'Joint Y']]
@@ -329,7 +332,12 @@ function renderGraphEditor(parent, clip, node) {
 }
 
 function renderInspector() {
+  const tab = app.project.inspectorTab === 'media' ? 'media' : 'values';
+  $$('[data-inspector-tab]').forEach(button => button.classList.toggle('active', button.dataset.inspectorTab === tab));
+  $('#inspector-values').classList.toggle('hidden', tab !== 'values');
+  $('#inspector-media').classList.toggle('hidden', tab !== 'media');
   const values = $('#inspector-values');
+  const media = $('#inspector-media');
   const clip = findClip(app.project.selectedClipId);
   const asset = findAsset(app.project.selectedAssetId) || (clip ? findAsset(clip.assetId) : null);
   const node = clip?.rig?.nodes.find(item => item.id === app.project.selectedNodeId);
@@ -357,7 +365,7 @@ function renderInspector() {
     }));
     const actionRow = document.createElement('div'); actionRow.className = 'property-actions';
     const deleteButton = document.createElement('button'); deleteButton.className = 'small-action'; deleteButton.textContent = 'Delete joint';
-    deleteButton.addEventListener('click', () => { pushUndo('Delete joint'); deleteNode(clip, node.id); app.project.selectedNodeId = null; app.renderAll(); });
+    deleteButton.addEventListener('click', () => { pushUndo('Delete joint'); deleteNode(clip, node.id); app.renderAll(); });
     const selectTool = document.createElement('button'); selectTool.className = 'small-action'; selectTool.textContent = 'Node tool (N)'; selectTool.addEventListener('click', () => { app.project.activeTool = 'node'; app.renderAll(); });
     actionRow.append(deleteButton, selectTool); rigSection.appendChild(actionRow);
     values.appendChild(rigSection);
@@ -367,7 +375,7 @@ function renderInspector() {
     const start = clipStartFrame(clip.id), localFrame = localFrameFor(clip);
     const transform = evaluateClipTransform(clip, localFrame);
     const section = document.createElement('section'); section.className = 'property-section';
-    section.innerHTML = '<h3>ARTWORK TRANSFORM</h3><p class="property-note">Move (M) changes the artwork layer. Auto Key records edits at the current playhead.</p>';
+    section.innerHTML = '<h3>ARTWORK TRANSFORM</h3><p class="property-note">Move tool (M) moves this layer. Auto Key records edits at the playhead.</p>';
     const transformFields = [
       ['Position X', 'x', transform.x, '0.1'], ['Position Y', 'y', transform.y, '0.1'],
       ['Rotation', 'rotation', transform.rotation, '1'], ['Scale', 'scale', transform.scale, '0.01'], ['Opacity', 'opacity', transform.opacity, '0.01'],
@@ -387,25 +395,38 @@ function renderInspector() {
         },
       }));
     }
-    values.appendChild(section);
-
     const rig = clip.rig;
     const rigInfo = document.createElement('section'); rigInfo.className = 'property-section';
-    rigInfo.innerHTML = `<h3>RIG</h3><div class="property-row"><label>Joints</label><span>${rig?.nodes?.length ?? 0}</span><span></span></div><div class="property-row"><label>Limbs</label><span>${rig?.bones?.length ?? 0}</span><span></span></div><p class="property-note">Rig (R): drag from a joint to create a limb. Shift-drag connects to an existing joint. Node (N) edits joints only.</p>`;
+    rigInfo.innerHTML = `<h3>RIG</h3><div class="property-row"><label>Joints</label><span>${rig?.nodes?.length ?? 0}</span><span></span></div><div class="property-row"><label>Limbs</label><span>${rig?.bones?.length ?? 0}</span><span></span></div><p class="property-note">Rig (R): drag from a point to create a limb; Shift-drag to connect to another point. Node (N): edit joints only. Move (M): move the artwork only.</p>`;
+    values.appendChild(section);
+    // Keep the animation graph directly beneath Transform in the same Values view.
+    // Media remains a single top-level Inspector tab; the graph has no Media sub-tab.
+    renderGraphEditor(values, clip, node || null);
     values.appendChild(rigInfo);
     const hierarchy = rigHierarchySection(clip); if (hierarchy) values.appendChild(hierarchy);
-    renderGraphEditor(values, clip, node || null);
   } else if (!node && asset) {
     const section = document.createElement('section'); section.className = 'property-section';
     section.innerHTML = `<h3>MEDIA DETAILS</h3><div class="media-detail">${asset.type === 'image' ? `<img src="${asset.dataUrl}" alt="">` : '<div class="media-thumb">♫</div>'}<div><strong></strong><span></span></div></div>`;
     section.querySelector('strong').textContent = asset.name;
     section.querySelector('span').textContent = asset.type === 'image' ? `${asset.width} × ${asset.height} px` : `${asset.duration?.toFixed(1) ?? '—'} seconds`;
     values.appendChild(section);
-    const hint = document.createElement('p'); hint.className = 'property-note';
-    hint.textContent = asset.type === 'image' ? 'Drag this image from Media onto V1 to add it to the sequence.' : 'Drag this audio from Media onto A1 to add it to the sequence.';
-    values.appendChild(hint);
+    if (asset.type === 'image') {
+      const hint = document.createElement('p'); hint.className = 'property-note'; hint.textContent = 'Drag this image from Media onto V1 to add it to the sequence.'; values.appendChild(hint);
+    }
   } else if (!node && !asset) {
-    values.innerHTML = '<div class="inspector-empty">Select an image clip or a rig joint to edit its values. Keyframes and the animation graph appear here when an image clip is selected.</div>';
+    values.innerHTML = '<div class="inspector-empty">Select a clip or joint to edit its values. Switch to Media to import and organize files.</div>';
+  }
+
+  media.innerHTML = '';
+  if (!asset) { media.innerHTML = '<div class="inspector-empty">Select a media item to see its source details.</div>'; }
+  else {
+    const section = document.createElement('section'); section.className = 'property-section';
+    section.innerHTML = `<h3>MEDIA SOURCE</h3><div class="media-detail">${asset.type === 'image' ? `<img src="${asset.dataUrl}" alt="">` : '<div class="media-thumb">♫</div>'}<div><strong></strong><span></span></div></div>`;
+    section.querySelector('strong').textContent = asset.name;
+    section.querySelector('span').textContent = `${asset.mime} · ${asset.type === 'image' ? `${asset.width} × ${asset.height}` : `${asset.duration?.toFixed(1) ?? '—'} sec`}`;
+    media.appendChild(section);
+    const hint = document.createElement('p'); hint.className = 'property-note'; hint.textContent = asset.type === 'image' ? 'Drag to V1, or to the temporary +V2 / +V3 layer target while dragging.' : 'Drag to A1, or to the temporary +A2 / +A3 layer target while dragging.';
+    media.appendChild(hint);
   }
 }
 
@@ -423,6 +444,10 @@ function renderToolbar() {
 function renderAll() {
   setProjectName(app.project.name);
   renderMedia(); renderInspector(); renderToolbar(); refreshTimeline(); refreshStage();
+  const tab = app.project.inspectorTab === 'media' ? 'media' : 'values';
+  $$('[data-inspector-tab]').forEach(button => button.classList.toggle('active', button.dataset.inspectorTab === tab));
+  $('#inspector-values').classList.toggle('hidden', tab !== 'values');
+  $('#inspector-media').classList.toggle('hidden', tab !== 'media');
   $('#auto-key-toggle').classList.toggle('active', app.project.autoKey !== false);
 }
 
@@ -607,17 +632,10 @@ app.renderTimeline = refreshTimeline;
 app.drawStage = refreshStage;
 app.renderAll = renderAll;
 
-function toggleInspectorContent() {
+function toggleInspector() {
   const collapsed = $('#inspector-panel').classList.toggle('collapsed');
-  $('#right-sidebar').classList.toggle('inspector-collapsed', collapsed);
-  $('#inspector-collapse').textContent = collapsed ? '⌄' : '⌃';
-  $('#inspector-collapse').title = collapsed ? 'Expand Inspector' : 'Collapse Inspector';
-}
-function toggleRightSidebar() {
-  const collapsed = $('#right-sidebar').classList.toggle('collapsed');
-  $('.editor-layout').classList.toggle('inspector-hidden', collapsed);
+  $('.editor-layout').classList.toggle('inspector-collapsed', collapsed);
   $('#toggle-inspector').textContent = collapsed ? '‹' : '›';
-  $('#toggle-inspector').title = collapsed ? 'Show Inspector and Media' : 'Hide Inspector and Media';
 }
 function toggleTools() {
   const collapsed = $('.editor-layout').classList.toggle('tools-collapsed');
@@ -632,6 +650,7 @@ $('#empty-import').addEventListener('click', () => $('#png-input').click());
 $('#media-import-button').addEventListener('click', () => { $('#media-input').click(); });
 $('#undo-button').addEventListener('click', () => undo());
 $('#redo-button').addEventListener('click', () => redo());
+$('#fit-stage').addEventListener('click', () => { app.project.viewZoom = 1; app.project.viewPan = { x: 0, y: 0 }; $('#zoom-label').textContent = '100%'; refreshStage(); });
 $('#zoom-in').addEventListener('click', () => { app.project.viewZoom = Math.min(5, app.project.viewZoom * 1.15); $('#zoom-label').textContent = `${Math.round(app.project.viewZoom * 100)}%`; refreshStage(); });
 $('#zoom-out').addEventListener('click', () => { app.project.viewZoom = Math.max(.15, app.project.viewZoom / 1.15); $('#zoom-label').textContent = `${Math.round(app.project.viewZoom * 100)}%`; refreshStage(); });
 $('#timeline-zoom-in').addEventListener('click', () => zoomTimeline(1));
@@ -649,28 +668,39 @@ $('#fps-select').addEventListener('change', event => { pushUndo('Change frame ra
 $('#project-menu-button').addEventListener('click', event => { event.stopPropagation(); $('#project-menu').classList.toggle('hidden'); });
 $('#project-menu').addEventListener('click', event => { const button = event.target.closest('[data-action]'); if (button) runMenuAction(button.dataset.action); });
 document.addEventListener('pointerdown', event => { if (!event.target.closest('#project-menu') && !event.target.closest('#project-menu-button')) closeMenu(); });
+$$('[data-inspector-tab]').forEach(button => button.addEventListener('click', () => {
+  app.project.inspectorTab = button.dataset.inspectorTab;
+  $$('[data-inspector-tab]').forEach(item => item.classList.toggle('active', item === button));
+  $('#inspector-values').classList.toggle('hidden', app.project.inspectorTab !== 'values');
+  $('#inspector-media').classList.toggle('hidden', app.project.inspectorTab !== 'media');
+}));
 
-
-$('#inspector-collapse').addEventListener('click', toggleInspectorContent);
-$('#toggle-inspector').addEventListener('click', toggleRightSidebar);
-$('#media-collapse').addEventListener('click', () => {
-  const collapsed = $('#media-panel').classList.toggle('collapsed');
-  $('#right-sidebar').classList.toggle('media-collapsed', collapsed);
-  $('#media-collapse').textContent = collapsed ? '›' : '⌄';
-  $('#media-collapse').title = collapsed ? 'Expand Media' : 'Collapse Media';
-});
+$('#inspector-collapse').addEventListener('click', () => toggleInspector());
+$('#toggle-inspector').addEventListener('click', () => toggleInspector());
 $('#toggle-tools').addEventListener('click', () => toggleTools());
 $('#toggle-timeline').addEventListener('click', () => { const collapsed = $('#bottom-dock').classList.toggle('timeline-collapsed'); $('#app-shell').classList.toggle('timeline-collapsed', collapsed); $('#toggle-timeline').textContent = collapsed ? '⌃' : '⌄'; });
-$('#window-minimize').addEventListener('click', () => { if (tauriMode) getCurrentWindow().minimize(); });
-$('#window-maximize').addEventListener('click', () => { if (tauriMode) getCurrentWindow().toggleMaximize(); else window.jupiterToast('Maximize is available in the desktop build.'); });
-$('#window-close').addEventListener('click', () => { if (tauriMode) getCurrentWindow().close(); else window.jupiterToast('Close this browser tab to exit.'); });
+async function runWindowAction(action, label) {
+  if (!tauriMode) {
+    window.jupiterToast(`${label} is available in the desktop build.`);
+    return;
+  }
+  try {
+    await action();
+  } catch (error) {
+    window.jupiterToast(`Couldn't ${label.toLowerCase()}: ${String(error).slice(0, 120)}`);
+  }
+}
+
+$('#window-minimize').addEventListener('click', () => runWindowAction(() => getCurrentWindow().minimize(), 'Minimize'));
+$('#window-maximize').addEventListener('click', () => runWindowAction(() => getCurrentWindow().toggleMaximize(), 'Maximize / restore'));
+$('#window-close').addEventListener('click', () => runWindowAction(() => getCurrentWindow().close(), 'Close'));
 $('.titlebar').addEventListener('pointerdown', event => {
   if (!tauriMode || event.button !== 0 || event.target.closest('button, input, select, a')) return;
-  getCurrentWindow().startDragging().catch(() => {});
+  runWindowAction(() => getCurrentWindow().startDragging(), 'Drag window');
 });
 $('.titlebar').addEventListener('dblclick', event => {
   if (!tauriMode || event.target.closest('button, input, select, a')) return;
-  getCurrentWindow().toggleMaximize().catch(() => {});
+  runWindowAction(() => getCurrentWindow().toggleMaximize(), 'Maximize / restore');
 });
 $('#project-name').addEventListener('dblclick', () => { const name = prompt('Project name', app.project.name); if (name?.trim()) { pushUndo('Rename project'); setProjectName(name.trim()); } });
 
@@ -739,5 +769,34 @@ if (tauriMode) {
   } catch (error) { console.warn('Native drop integration unavailable', error); }
 }
 
+async function initializeLiquidGlass() {
+  // Keep the upstream library's WebGL blur/refraction as a restrained white
+  // frosting pass only. The CSS surface is the offline/WebGL fallback.
+  try {
+    if (typeof Container === 'undefined' || typeof html2canvas === 'undefined') return;
+    window.glassControls = {
+      edgeIntensity: .001, rimIntensity: .001, baseIntensity: .001,
+      edgeDistance: .18, rimDistance: .8, baseDistance: .12,
+      cornerBoost: .001, rippleEffect: .0001, blurRadius: 7,
+    };
+    const panels = ['.inspector', '.bottom-dock', '.commandbar', '.tool-rail'];
+    for (const selector of panels) {
+      const panel = $(selector); if (!panel || panel.dataset.liquidEnhanced) continue;
+      const overlay = new Container({ borderRadius: 9, tintOpacity: .22 });
+      overlay.element.style.position = 'absolute'; overlay.element.style.inset = '0';
+      overlay.element.style.width = '100%'; overlay.element.style.height = '100%';
+      overlay.element.style.padding = '0'; overlay.element.style.gap = '0';
+      overlay.element.style.pointerEvents = 'none'; overlay.element.style.zIndex = '0';
+      overlay.canvas.style.zIndex = '0'; overlay.canvas.style.boxShadow = 'none';
+      panel.prepend(overlay.element);
+      for (const child of [...panel.children]) if (child !== overlay.element) {
+        child.style.position ||= 'relative'; child.style.zIndex = '1';
+      }
+      panel.dataset.liquidEnhanced = 'true';
+      const observer = new ResizeObserver(() => overlay.updateSizeFromDOM()); observer.observe(panel);
+    }
+  } catch (error) { console.info('White frost CSS fallback remains active.', error); }
+}
 
 renderAll();
+setTimeout(initializeLiquidGlass, 450);
