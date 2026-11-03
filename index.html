@@ -11,7 +11,11 @@
   <div id="app-shell">
     <header class="titlebar glass-panel" id="titlebar">
       <div class="brand-zone">
-        <button class="brand-orb" id="project-menu-button" title="Project menu" aria-label="Open project menu"><span>J</span></button>
+        <button class="brand-orb" id="theme-toggle" title="Switch to dark theme" aria-label="Switch to dark theme" aria-pressed="false">
+          <img id="title-logo" alt="" hidden />
+          <span class="brand-fallback" aria-hidden="true"></span>
+        </button>
+        <button class="project-menu-trigger" id="project-menu-button" title="Project menu" aria-label="Open project menu">···</button>
         <span class="title-divider"></span>
         <span class="project-name" id="project-name" data-tauri-drag-region>Untitled Project</span>
       </div>
@@ -65,6 +69,7 @@
             <button class="icon-button" id="toggle-inspector" title="Collapse inspector" aria-label="Collapse inspector">›</button>
           </div>
         </div>
+        <button class="panel-resizer inspector-resizer" id="inspector-resize-handle" type="button" role="separator" aria-orientation="vertical" aria-label="Resize inspector panel" title="Drag to resize inspector" aria-valuemin="260" aria-valuenow="360" aria-valuemax="600"></button>
         <div class="canvas-wrap" id="canvas-wrap">
           <canvas id="stage-canvas" aria-label="Animation canvas"></canvas>
           <div class="stage-empty" id="stage-empty">
@@ -97,6 +102,7 @@
     </main>
 
     <section class="bottom-dock" id="bottom-dock">
+      <button class="panel-resizer timeline-resizer" id="timeline-resize-handle" type="button" role="separator" aria-orientation="horizontal" aria-label="Resize timeline panel" title="Drag to resize timeline" aria-valuemin="180" aria-valuenow="270" aria-valuemax="600"></button>
       <div class="timeline-toolbar">
         <div class="timeline-title"><strong>Timeline</strong><span class="fps-label" id="sequence-info">24 FPS · 00:00</span></div>
         <div class="transport">

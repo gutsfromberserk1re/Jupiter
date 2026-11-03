@@ -442,6 +442,14 @@ function renderGraphEditor(parent, clip, node) {
     const rect = canvas.getBoundingClientRect();
     const width = Math.max(180, Math.floor(rect.width));
     const height = Math.max(220, Math.floor(rect.height || 300)); const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dark = document.body.classList.contains('dark-theme');
+    const gridColor = dark ? '#3b4854' : '#e1e8ef';
+    const axisColor = dark ? '#536371' : '#c8d3de';
+    const labelColor = dark ? '#a4b2be' : '#74879a';
+    const curveColor = dark ? '#8bb5d7' : '#6487a5';
+    const basePointColor = dark ? '#27323d' : '#fff';
+    const keyPointColor = dark ? '#78baff' : '#438fc9';
+    const keyStrokeColor = dark ? '#add5f5' : '#3279b2';
     canvas.width = width * dpr; canvas.height = height * dpr;
     const c = canvas.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, width, height);
     const current = graphValues(clip, node, property.value);
@@ -460,16 +468,16 @@ function renderGraphEditor(parent, clip, node) {
     for (let i = 0; i <= 4; i++) {
       const y = top + (bottom - top) * i / 4;
       const value = max - (max - min) * i / 4;
-      c.strokeStyle = i === 4 ? '#c8d3de' : '#e1e8ef'; c.lineWidth = 1;
+      c.strokeStyle = i === 4 ? axisColor : gridColor; c.lineWidth = 1;
       c.beginPath(); c.moveTo(left, y); c.lineTo(right, y); c.stroke();
-      c.fillStyle = '#74879a';
+      c.fillStyle = labelColor;
       const label = current.axis === 'opacity' || current.axis === 'scale' ? `${Math.round(value * 100)}%` : Number(value.toFixed(Math.abs(max - min) < 10 ? 1 : 0)).toString();
       c.fillText(label, 3, y + 3);
     }
     for (let i = 0; i <= 4; i++) {
       const frame = Math.round(maxFrame * i / 4), x = px(frame);
-      c.strokeStyle = '#e6ecf2'; c.beginPath(); c.moveTo(x, top); c.lineTo(x, bottom); c.stroke();
-      c.fillStyle = '#74879a'; c.textAlign = i === 0 ? 'left' : i === 4 ? 'right' : 'center';
+      c.strokeStyle = gridColor; c.beginPath(); c.moveTo(x, top); c.lineTo(x, bottom); c.stroke();
+      c.fillStyle = labelColor; c.textAlign = i === 0 ? 'left' : i === 4 ? 'right' : 'center';
       c.fillText(`${(frame / app.project.fps).toFixed(1)}s`, x, height - 8);
     }
     c.textAlign = 'left';
@@ -492,11 +500,11 @@ function renderGraphEditor(parent, clip, node) {
           }
         } else c.lineTo(px(next.frame), py(next.value));
       }
-      c.strokeStyle = '#6487a5'; c.lineWidth = 1.5; c.stroke();
+      c.strokeStyle = curveColor; c.lineWidth = 1.5; c.stroke();
       for (const point of points) {
         const x = px(point.frame), y = py(point.value), size = point.source.__base ? 3 : 4.5;
         c.beginPath(); c.moveTo(x, y - size); c.lineTo(x + size, y); c.lineTo(x, y + size); c.lineTo(x - size, y); c.closePath();
-        c.fillStyle = point.source.__base ? '#fff' : '#438fc9'; c.fill(); c.strokeStyle = '#3279b2'; c.lineWidth = 1.2; c.stroke();
+        c.fillStyle = point.source.__base ? basePointColor : keyPointColor; c.fill(); c.strokeStyle = keyStrokeColor; c.lineWidth = 1.2; c.stroke();
       }
     }
     return { current, px, py, min, max, left, right, top, bottom, maxFrame };
@@ -951,12 +959,147 @@ function toggleInspector() {
   const collapsed = $('#inspector-panel').classList.toggle('collapsed');
   $('.editor-layout').classList.toggle('inspector-collapsed', collapsed);
   $('#toggle-inspector').textContent = collapsed ? '‹' : '›';
+  $('#toggle-inspector').title = collapsed ? 'Show inspector' : 'Collapse inspector';
+  $('#toggle-inspector').setAttribute('aria-label', collapsed ? 'Show inspector' : 'Collapse inspector');
+  $('#toggle-inspector').setAttribute('aria-expanded', String(!collapsed));
 }
 function toggleTools() {
   const collapsed = $('.editor-layout').classList.toggle('tools-collapsed');
   $('#toggle-tools').textContent = collapsed ? '›' : '‹';
   $('#toggle-tools').title = collapsed ? 'Show tools' : 'Collapse tools';
+  $('#toggle-tools').setAttribute('aria-label', collapsed ? 'Show tools' : 'Collapse tools');
 }
+
+function applyTheme(dark, persist = false) {
+  document.body.classList.toggle('dark-theme', dark);
+  const button = $('#theme-toggle');
+  button.setAttribute('aria-pressed', String(dark));
+  button.title = dark ? 'Switch to light theme' : 'Switch to dark theme';
+  button.setAttribute('aria-label', button.title);
+  if (persist) {
+    try { localStorage.setItem('jupiter-theme', dark ? 'dark' : 'light'); } catch { /* Storage can be disabled in web previews. */ }
+    app.renderInspector?.();
+  }
+}
+
+function setupPanelResizers() {
+  const editor = $('.editor-layout');
+  const inspector = $('#inspector-panel');
+  const inspectorHandle = $('#inspector-resize-handle');
+  const timeline = $('#bottom-dock');
+  const timelineHandle = $('#timeline-resize-handle');
+  const shell = $('#app-shell');
+  let activeDrag = null;
+
+  const inspectorBounds = () => {
+    const minimum = window.innerWidth <= 520 ? 190 : window.innerWidth <= 760 ? 220 : 260;
+    const style = getComputedStyle(editor);
+    const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    const gap = parseFloat(style.columnGap) || 0;
+    const rail = editor.classList.contains('tools-collapsed') ? 0 : $('.tool-rail').getBoundingClientRect().width;
+    const maximum = Math.max(minimum, Math.min(620, editor.clientWidth - padding - rail - 300 - gap * 2));
+    return { minimum, maximum };
+  };
+
+  const setInspectorWidth = width => {
+    const { minimum, maximum } = inspectorBounds();
+    const value = Math.round(Math.max(minimum, Math.min(maximum, width)));
+    editor.style.setProperty('--inspector-width', `${value}px`);
+    inspectorHandle.setAttribute('aria-valuemin', String(minimum));
+    inspectorHandle.setAttribute('aria-valuemax', String(maximum));
+    inspectorHandle.setAttribute('aria-valuenow', String(value));
+  };
+
+  const timelineTrackHeight = () => {
+    const marginBottom = parseFloat(getComputedStyle(timeline).marginBottom) || 0;
+    return timeline.getBoundingClientRect().height + marginBottom;
+  };
+  const timelineBounds = () => {
+    const minimum = 180;
+    const maximum = Math.max(minimum, Math.min(Math.round(window.innerHeight * .68), window.innerHeight - 58 - 54 - 170 - 18));
+    return { minimum, maximum };
+  };
+  const syncHandleRanges = () => {
+    const inspectorRange = inspectorBounds();
+    inspectorHandle.setAttribute('aria-valuemin', String(inspectorRange.minimum));
+    inspectorHandle.setAttribute('aria-valuemax', String(inspectorRange.maximum));
+    inspectorHandle.setAttribute('aria-valuenow', String(Math.round(inspector.getBoundingClientRect().width)));
+    const timelineRange = timelineBounds();
+    timelineHandle.setAttribute('aria-valuemin', String(timelineRange.minimum));
+    timelineHandle.setAttribute('aria-valuemax', String(timelineRange.maximum));
+    timelineHandle.setAttribute('aria-valuenow', String(Math.round(timelineTrackHeight())));
+  };
+  const setTimelineHeight = height => {
+    const { minimum, maximum } = timelineBounds();
+    const value = Math.round(Math.max(minimum, Math.min(maximum, height)));
+    shell.style.setProperty('--timeline-height', `${value}px`);
+    timelineHandle.setAttribute('aria-valuemin', String(minimum));
+    timelineHandle.setAttribute('aria-valuemax', String(maximum));
+    timelineHandle.setAttribute('aria-valuenow', String(value));
+  };
+
+  inspectorHandle.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || editor.classList.contains('inspector-collapsed')) return;
+    const { minimum, maximum } = inspectorBounds();
+    activeDrag = { kind: 'inspector', pointerId: event.pointerId, min: minimum, max: maximum };
+    document.body.classList.add('panel-resizing');
+    event.preventDefault();
+  });
+  timelineHandle.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || timeline.classList.contains('timeline-collapsed')) return;
+    activeDrag = { kind: 'timeline', pointerId: event.pointerId, startY: event.clientY, startHeight: timelineTrackHeight() };
+    document.body.classList.add('panel-resizing', 'timeline-panel-resizing');
+    event.preventDefault();
+  });
+
+  window.addEventListener('pointermove', event => {
+    if (!activeDrag || event.pointerId !== activeDrag.pointerId) return;
+    if (activeDrag.kind === 'inspector') {
+      const editorRect = editor.getBoundingClientRect();
+      const rightPadding = parseFloat(getComputedStyle(editor).paddingRight) || 0;
+      setInspectorWidth(editorRect.right - rightPadding - event.clientX);
+    } else {
+      setTimelineHeight(activeDrag.startHeight + activeDrag.startY - event.clientY);
+    }
+  });
+  const endDrag = event => {
+    if (!activeDrag || (event?.pointerId != null && event.pointerId !== activeDrag.pointerId)) return;
+    activeDrag = null;
+    document.body.classList.remove('panel-resizing', 'timeline-panel-resizing');
+  };
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
+
+  inspectorHandle.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    setInspectorWidth(inspector.getBoundingClientRect().width + (event.key === 'ArrowLeft' ? -20 : 20));
+  });
+  timelineHandle.addEventListener('keydown', event => {
+    if (event.key === 'Home') { event.preventDefault(); setTimelineHeight(timelineBounds().minimum); return; }
+    if (event.key === 'End') { event.preventDefault(); setTimelineHeight(timelineBounds().maximum); return; }
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    setTimelineHeight(timelineTrackHeight() + (event.key === 'ArrowUp' ? 20 : -20));
+  });
+
+  window.addEventListener('resize', syncHandleRanges);
+  syncHandleRanges();
+}
+
+const titleLogo = $('#title-logo');
+const titleLogoFallback = $('#theme-toggle .brand-fallback');
+const refreshTitleLogo = () => {
+  const available = titleLogo.complete && titleLogo.naturalWidth > 0;
+  titleLogo.hidden = !available;
+  titleLogoFallback.hidden = available;
+};
+titleLogo.addEventListener('load', refreshTitleLogo);
+titleLogo.addEventListener('error', refreshTitleLogo);
+titleLogo.src = '/logo.ico';
+refreshTitleLogo();
+try { applyTheme(localStorage.getItem('jupiter-theme') === 'dark'); } catch { applyTheme(false); }
+setupPanelResizers();
 
 // Tool selection.
 $$('[data-tool]').forEach(button => button.addEventListener('click', () => setTool(button.dataset.tool)));
@@ -976,6 +1119,7 @@ $('#step-back').addEventListener('click', () => seekFrame(app.project.currentFra
 $('#step-forward').addEventListener('click', () => seekFrame(app.project.currentFrame + 1));
 $('#fps-select').addEventListener('change', event => { pushUndo('Change frame rate'); const old = app.project.fps; app.project.fps = Number(event.target.value); for (const clip of app.project.clips) clip.durationFrames = Math.max(1, Math.round(clip.durationFrames * app.project.fps / old)); app.renderAll(); });
 
+$('#theme-toggle').addEventListener('click', () => applyTheme(!document.body.classList.contains('dark-theme'), true));
 $('#project-menu-button').addEventListener('click', event => { event.stopPropagation(); $('#project-menu').classList.toggle('hidden'); });
 $('#project-menu').addEventListener('click', event => { const button = event.target.closest('[data-action]'); if (button) runMenuAction(button.dataset.action); });
 document.addEventListener('pointerdown', event => { if (!event.target.closest('#project-menu') && !event.target.closest('#project-menu-button')) closeMenu(); });
@@ -987,7 +1131,14 @@ $$('[data-inspector-tab]').forEach(button => button.addEventListener('click', ()
 $('#inspector-collapse').addEventListener('click', () => toggleInspector());
 $('#toggle-inspector').addEventListener('click', () => toggleInspector());
 $('#toggle-tools').addEventListener('click', () => toggleTools());
-$('#toggle-timeline').addEventListener('click', () => { const collapsed = $('#bottom-dock').classList.toggle('timeline-collapsed'); $('#app-shell').classList.toggle('timeline-collapsed', collapsed); $('#toggle-timeline').textContent = collapsed ? '⌃' : '⌄'; });
+$('#toggle-timeline').addEventListener('click', () => {
+  const collapsed = $('#bottom-dock').classList.toggle('timeline-collapsed');
+  $('#app-shell').classList.toggle('timeline-collapsed', collapsed);
+  $('#toggle-timeline').textContent = collapsed ? '⌃' : '⌄';
+  $('#toggle-timeline').title = collapsed ? 'Expand timeline' : 'Collapse timeline';
+  $('#toggle-timeline').setAttribute('aria-label', collapsed ? 'Expand timeline' : 'Collapse timeline');
+  $('#toggle-timeline').setAttribute('aria-expanded', String(!collapsed));
+});
 $('#window-minimize').addEventListener('click', () => { if (tauriMode) getCurrentWindow().minimize().catch(error => window.jupiterToast(`Minimize failed: ${error}`)); });
 $('#window-maximize').addEventListener('click', () => { if (tauriMode) getCurrentWindow().toggleMaximize().catch(error => window.jupiterToast(`Maximize failed: ${error}`)); else window.jupiterToast('Window controls are available in the desktop app.'); });
 $('#window-close').addEventListener('click', () => { if (tauriMode) getCurrentWindow().close().catch(error => window.jupiterToast(`Close failed: ${error}`)); else window.jupiterToast('Close this browser tab to exit.'); });

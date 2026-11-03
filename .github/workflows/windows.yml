@@ -34,18 +34,9 @@ jobs:
       - name: Build standalone Windows executable
         run: npm run tauri build -- --no-bundle
 
-      - name: Prepare FFmpeg runtime beside executable
-        shell: pwsh
-        run: |
-          $runtimeTarget = "src-tauri/target/release/ffmpeg"
-          New-Item -ItemType Directory -Path $runtimeTarget -Force | Out-Null
-          Copy-Item -Path "src-tauri/resources/ffmpeg/*" -Destination $runtimeTarget -Recurse -Force
-
       - name: Upload standalone test build
         uses: actions/upload-artifact@v4
         with:
           name: Jupiter-Windows-Test-Build
-          path: |
-            src-tauri/target/release/jupiter.exe
-            src-tauri/target/release/ffmpeg/**
+          path: src-tauri/target/release/jupiter.exe
           if-no-files-found: error

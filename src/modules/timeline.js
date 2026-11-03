@@ -225,6 +225,20 @@ function renderTimeline() {
   document.getElementById('timeline-zoom-out').disabled = ppf <= 1.5;
 }
 
+let timelineResizeFrame = 0;
+const redrawTimelineAfterResize = () => {
+  if (timelineResizeFrame) cancelAnimationFrame(timelineResizeFrame);
+  timelineResizeFrame = requestAnimationFrame(() => {
+    timelineResizeFrame = 0;
+    renderTimeline();
+  });
+};
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(redrawTimelineAfterResize).observe(scroll);
+} else {
+  window.addEventListener('resize', redrawTimelineAfterResize);
+}
+
 function onClipPointerDown(event) {
   if (event.button !== 0) return;
   const clip = findClip(event.currentTarget.dataset.clipId);

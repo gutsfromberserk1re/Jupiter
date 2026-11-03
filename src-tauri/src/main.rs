@@ -4,8 +4,13 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::fs;
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{path::BaseDirectory, AppHandle, Manager};
+
+mod embedded_ffmpeg {
+    include!(concat!(env!("OUT_DIR"), "/embedded_ffmpeg.rs"));
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,8 +105,44 @@ fn tool_file_name(name: &str) -> String {
     if cfg!(target_os = "windows") { format!("{name}.exe") } else { name.to_string() }
 }
 
+fn embedded_ffmpeg_dir(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    if embedded_ffmpeg::FILES.is_empty() { return Ok(None); }
+    static EXTRACTED_DIRECTORY: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    EXTRACTED_DIRECTORY.get_or_init(|| {
+        let directory = app.path().app_cache_dir()
+            .map_err(|error| format!("Could not locate Jupiter's runtime cache: {error}"))?
+            .join("ffmpeg")
+            .join(env!("CARGO_PKG_VERSION"))
+            .join(embedded_ffmpeg::RUNTIME_FINGERPRINT);
+        fs::create_dir_all(&directory).map_err(|error| format!("Could not create Jupiter's runtime cache: {error}"))?;
+        for (relative, bytes) in embedded_ffmpeg::FILES {
+            let relative_path = Path::new(relative);
+            if relative_path.components().any(|component| matches!(component, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))) {
+                return Err("Embedded FFmpeg contains an invalid path.".to_string());
+            }
+            let target = directory.join(relative_path);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|error| format!("Could not prepare FFmpeg runtime: {error}"))?;
+            }
+            let already_extracted = fs::metadata(&target)
+                .map(|metadata| metadata.len() == bytes.len() as u64)
+                .unwrap_or(false);
+            if !already_extracted {
+                fs::write(&target, bytes).map_err(|error| format!("Could not extract FFmpeg runtime: {error}"))?;
+            }
+        }
+        Ok(directory)
+    }).clone().map(Some)
+}
+
 fn resolve_tool(app: &AppHandle, name: &str) -> Option<PathBuf> {
     let filename = tool_file_name(name);
+    if let Ok(Some(directory)) = embedded_ffmpeg_dir(app) {
+        let path = directory.join(&filename);
+        if path.is_file() { return Some(path); }
+    }
+
+    // Resource fallback keeps local development builds usable without a bundled payload.
     if let Ok(path) = app.path().resolve(format!("ffmpeg/{filename}"), BaseDirectory::Resource) {
         if path.is_file() { return Some(path); }
     }

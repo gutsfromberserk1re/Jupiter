@@ -6,9 +6,9 @@ Jupiter is a native desktop editor for rigging and animating imported 2D artwork
 
 - A permanent, slim **left tool rail** with Select, Move, Rig and Node tools.
 - A central transparent checkerboard 2D canvas.
-- A right Inspector with **Values** and **Media** tabs. Values places transform/key controls beside the animation graph; Media is the import/library surface.
+- A right Inspector with **Values** and **Media** tabs. Values groups transform/key controls above the animation graph; Media is the import/library surface.
 - A full-width, solid timeline along the bottom.
-- A slate-gray app surround with translucent white frosted panels. No neon glow or external Liquid Glass runtime.
+- A soft blue-gray app surround with translucent white frosted panels, plus a dark theme toggle on the title-bar logo.
 
 ## Tools
 
@@ -19,7 +19,7 @@ Jupiter is a native desktop editor for rigging and animating imported 2D artwork
 | Rig | `R` | Drag from an existing joint to create a limb and endpoint. Hold Shift to connect to an existing joint. Starting on artwork with no rig creates its root joint. |
 | Node | `N` | Moves existing rig joints only. It does not create bones or move the artwork. |
 
-The Node icon is a cursor with a stem and endpoint. The tool rail is always visible unless deliberately collapsed with the small canvas-side chevron. Pan the canvas with middle-mouse drag or Alt+drag.
+The Node icon is a cursor with a stem and endpoint. The tool rail is visible unless collapsed with the small canvas-side chevron. Drag the divider beside the Inspector to resize it. Pan the canvas with middle-mouse drag or Alt+drag.
 
 ## Media
 
@@ -31,7 +31,7 @@ Open the **Media** tab in the right Inspector and press **Add media**, or drop f
 - Joint positions and artwork Position X/Y, Rotation, Scale and Opacity can be keyframed.
 - Keyframe diamonds are displayed on the corresponding timeline clip.
 - The Values area includes property key controls and previous/next keyframe navigation.
-- The Graph Editor sits beside Values controls and allows key points to be moved in time/value. Linear, Ease and Hold interpolation are supported.
+- The Graph Editor follows the Values controls and allows key points to be moved in time/value. Linear, Ease and Hold interpolation are supported.
 - Playback, pause, stop, frame stepping and FPS selection are available.
 - Undo/redo are available from the toolbar and keyboard.
 
@@ -41,11 +41,12 @@ Open the **Media** tab in the right Inspector and press **Add media**, or drop f
 - V2/V3 and A2/A3 appear as drop targets while dragging matching media or moving a clip into a new lane.
 - Clips on a track are magnetic and contiguous; dragging reorders clips without leaving gaps.
 - Video tracks composite from V1 through V3. Audio clips play during preview.
+- Drag the timeline's top edge to give the timeline more or less vertical space. Its ruler redraws when the app window or panels are resized.
 
 ## Projects and desktop window
 
 - New, Open, Save and Save As use portable `.jupiter` project files with media embedded.
-- The custom title bar supports dragging and double-click maximize/restore. The traffic-light controls are green=minimize, yellow=maximize/restore and red=close.
+- The title-bar logo toggles between light and dark themes. If `public/logo.ico` is not present, a black circle appears in its place. The custom title bar supports dragging and double-click maximize/restore. The traffic-light controls are green=minimize, yellow=maximize/restore and red=close.
 - Export opens a save dialog and renders the timeline to MP4, including the timeline audio mix.
 
 ## Run on Windows
@@ -74,7 +75,7 @@ npm run tauri build
 
 For a browser-only UI/interaction preview without the Rust shell, double-click `run-web-preview.bat` or run `npm run dev`, then open `http://127.0.0.1:1420`.
 
-The Windows desktop build uses FFmpeg 9.0.2 and FFprobe from an LGPL shared build. `run-jupiter-dev.bat` and the GitHub Actions workflows run `npm run setup:ffmpeg` automatically; for a manual build, run that command before `npm run tauri dev` or `npm run tauri build`. The workflows publish a standalone `jupiter.exe` test build with its `ffmpeg` runtime folder beside it, without creating an installer. Local `npm run tauri build` still creates the configured NSIS/MSI installers. See `FFMPEG-NOTICE.md` for licensing and upstream details. Rust dependency outputs are cached between CI runs.
+The Windows desktop build uses FFmpeg 9.0.2 and FFprobe from an LGPL shared build. `run-jupiter-dev.bat` and the GitHub Actions workflows run `npm run setup:ffmpeg` automatically; for a manual build, run that command before `npm run tauri dev` or `npm run tauri build`. The FFmpeg executables, required DLLs, and license files are embedded into the application during the Rust build. At runtime, Jupiter extracts them to its app cache so Windows can launch FFmpeg; the standalone test artifact is a single `jupiter.exe` with no adjacent FFmpeg folder. The workflows do not create installers. Local `npm run tauri build` still creates the configured NSIS/MSI installers. See `FFMPEG-NOTICE.md` for licensing and upstream details. Rust dependency outputs are cached between CI runs.
 
 ## Current implementation limits
 
