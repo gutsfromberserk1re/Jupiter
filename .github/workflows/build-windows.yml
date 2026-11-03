@@ -26,8 +26,17 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      - name: Cache bundled FFmpeg runtime
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/ffmpeg
+          key: ffmpeg-win64-lgpl-9.0.2-gd7643a0fe3
+
       - name: Install frontend dependencies
         run: npm install
+
+      - name: Install bundled FFmpeg runtime
+        run: npm run setup:ffmpeg
 
       - name: Build Windows app
         run: npm run tauri build

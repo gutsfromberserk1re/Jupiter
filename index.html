@@ -17,8 +17,8 @@
         <span class="project-name" id="project-name" data-tauri-drag-region>Untitled Project</span>
       </div>
       <div class="window-controls" aria-label="Window controls">
-        <button class="window-dot maximize" id="window-maximize" title="Maximize / Restore" aria-label="Maximize or restore"></button>
         <button class="window-dot minimize" id="window-minimize" title="Minimize" aria-label="Minimize"></button>
+        <button class="window-dot maximize" id="window-maximize" title="Maximize / Restore" aria-label="Maximize or restore"></button>
         <button class="window-dot close" id="window-close" title="Close" aria-label="Close"></button>
       </div>
     </header>
@@ -84,8 +84,11 @@
         <div class="inspector-scroll">
           <div class="inspector-body" id="inspector-values"></div>
           <div class="inspector-body hidden" id="inspector-media">
-            <div class="media-panel-heading"><div><span class="eyebrow">PROJECT LIBRARY</span><h2>Media</h2></div></div>
-            <div class="media-filter"><span>Imported assets</span><span class="media-filter-note">DRAG TO TIMELINE</span></div>
+            <div class="media-panel-heading">
+              <div><span class="eyebrow">PROJECT LIBRARY</span><h2>Media</h2></div>
+              <button class="media-import-button" id="media-import-button" type="button" title="Import image or audio" aria-label="Import media">＋ Add media</button>
+            </div>
+            <div class="media-filter"><span>Imported assets <span id="media-count-inline">0</span></span><span class="media-filter-status"><span class="media-filter-note" id="media-import-status">READY</span><span class="media-filter-note" id="ffmpeg-status">FFMPEG CHECKING</span></span></div>
             <div class="media-list" id="media-list"><div class="media-empty">No media</div></div>
           </div>
         </div>

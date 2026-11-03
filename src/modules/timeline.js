@@ -253,6 +253,18 @@ function insertionIndex(track, frame, excludeId = null) {
   return ids.length;
 }
 
+function laneAtPoint(clientX, clientY) {
+  const hit = document.elementFromPoint(clientX, clientY)?.closest('.track-lane, .new-layer-drop');
+  if (hit) return hit;
+  // WebView2 can report an overlay/playhead as the hit target while dragging.
+  // Resolve the lane geometrically as a fallback so drops still land on V1/A1.
+  const candidates = [...lanes.querySelectorAll('.track-lane, .new-layer-drop')];
+  return candidates.find(lane => {
+    const rect = lane.getBoundingClientRect();
+    return clientY >= rect.top && clientY <= rect.bottom;
+  }) || null;
+}
+
 function resolveDropTrack(lane, expectedType) {
   if (!lane) return getTracks(expectedType)[0] || null;
   if (lane.dataset.createTrack === expectedType) return addTrack(expectedType);
@@ -270,7 +282,7 @@ function finishClipDrag(event) {
     state.element.style.opacity = ''; state.element.style.pointerEvents = '';
   };
   if (!clip || !state.moved) { resetVisual(); return; }
-  const lane = document.elementFromPoint(event.clientX, event.clientY)?.closest('.track-lane, .new-layer-drop');
+  const lane = laneAtPoint(event.clientX, event.clientY);
   if (!lane) { resetVisual(); return; }
   const source = findTrack(state.fromTrackId);
   const target = resolveDropTrack(lane, source?.type);
@@ -395,12 +407,19 @@ export function refreshTimeline() { renderTimeline(); }
 export function updateTimelinePlayhead() { const previous = app.project.selectedClipId; updateStatus(); updatePlayhead(); if (previous !== app.project.selectedClipId) app.renderInspector(); }
 
 export function handleTimelineDrop(assetId, clientX, clientY = null) {
-  const asset = app.project.assets.find(item => item.id === assetId);
-  if (!asset) return;
+  const asset = findAsset(assetId);
+  if (!asset) {
+    window.jupiterToast?.('That media item is no longer in the Media library.');
+    return false;
+  }
   const expectedType = asset.type === 'audio' ? 'audio' : 'video';
-  const lane = Number.isFinite(clientY) ? document.elementFromPoint(clientX, clientY)?.closest('.track-lane, .new-layer-drop') : null;
+  const lane = Number.isFinite(clientY) ? laneAtPoint(clientX, clientY) : null;
   const track = resolveDropTrack(lane, expectedType);
-  if (!track) { window.jupiterToast?.(`Jupiter supports up to three ${expectedType} layers.`); return; }
+  if (!track) {
+    window.jupiterToast?.(`No ${expectedType} layer is available. Add another layer or drop onto a matching track.`);
+    setAssetDragState(null, false);
+    return false;
+  }
   const frame = frameFromEvent({ clientX });
   const index = insertionIndex(track, frame);
   const clip = {
@@ -421,6 +440,7 @@ export function handleTimelineDrop(assetId, clientX, clientY = null) {
   app.project.currentFrame = clipStartFrame(clip.id);
   setAssetDragState(null, false);
   app.renderAll();
+  return true;
 }
 
 renderTimeline();

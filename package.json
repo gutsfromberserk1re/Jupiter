@@ -1,7 +1,7 @@
 {
   "name": "jupiter-animator",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420",
@@ -9,7 +9,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",
     "test": "node --test",
-    "check": "node --check src/main.js && node --check src/modules/stage.js && node --check src/modules/rig.js && node --check src/modules/timeline.js"
+    "check": "node --check src/main.js && node --check src/modules/stage.js && node --check src/modules/rig.js && node --check src/modules/skinning.js && node --check src/modules/state.js && node --check src/modules/timeline.js && node --check src/modules/media-io.js",
+    "setup:ffmpeg": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ffmpeg.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

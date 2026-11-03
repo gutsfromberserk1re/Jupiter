@@ -1,10 +1,12 @@
 import { app, findAsset, findClip, getActiveClip, getActiveClips, pushUndo, ensureRig } from './state.js';
 import { nearestNode, evaluateNode, evaluateClipTransform, setNodePose, setClipTransformValue, createNode, createBone } from './rig.js';
+import { SKIN_GRID, autoWeights, weightsAt, paintWeights, ensureWeights } from './skinning.js';
 
 const canvas = document.getElementById('stage-canvas');
 const ctx = canvas.getContext('2d', { alpha: true });
-let cssWidth = 1, cssHeight = 1, dpr = 1, dirty = true, drawScheduled = false, pointerState = null;
+let cssWidth = 1, cssHeight = 1, dpr = 1, dirty = true, drawScheduled = false, pointerState = null, brushCursor = null;
 const meshBuffers = new Map();
+const weightHeatmaps = new Map();
 
 function requestDraw() {
   dirty = true;
@@ -126,24 +128,18 @@ function mapPointByBone(point, restA, restB, poseA, poseB) {
   return { x: poseA.x + vx * (along * poseLength / restLength) - vy * across, y: poseA.y + vy * (along * poseLength / restLength) + vx * across };
 }
 
-function skinPoint(point, rig, poses) {
-  if (!rig?.bones?.length) return point;
+function skinPoint(point, rig, poses, segments) {
+  if (!segments.length) return point;
+  const weights = weightsAt(rig, point.x, point.y, SKIN_GRID);
   let total = 0, x = 0, y = 0;
-  for (const bone of rig.bones) {
-    const a = rig.nodes.find(node => node.id === bone.from);
-    const b = rig.nodes.find(node => node.id === bone.to);
-    if (!a || !b) continue;
-    const restA = { x: a.x, y: a.y }, restB = { x: b.x, y: b.y };
-    const poseA = poses.get(a.id) ?? restA, poseB = poses.get(b.id) ?? restB;
-    const distance = pointSegmentDistance(point, restA, restB);
-    const weight = Math.exp(-(distance * distance) / (2 * .22 * .22));
-    if (weight < .0001) continue;
-    const mapped = mapPointByBone(point, restA, restB, poseA, poseB);
+  for (const segment of segments) {
+    const weight = weights[segment.id] || 0;
+    if (weight <= 1e-5) continue;
+    const mapped = mapPointByBone(point, segment.start, segment.end, poses.get(segment.start.id) ?? segment.start, poses.get(segment.end.id) ?? segment.end);
     x += mapped.x * weight; y += mapped.y * weight; total += weight;
   }
-  if (total < .0001) return point;
-  const blend = Math.min(.98, total / (total + .35));
-  return { x: point.x * (1 - blend) + (x / total) * blend, y: point.y * (1 - blend) + (y / total) * blend };
+  if (total < 1e-5) return point;
+  return { x: x / total, y: y / total };
 }
 
 function affineTriangle(target, src, dst) {
@@ -164,26 +160,33 @@ function affineTriangle(target, src, dst) {
 }
 
 function renderDeformedImage(image, rig, poses, clipId) {
-  if (!rig?.bones?.length || !rig.nodes?.length) return image;
+  const imageWidth = image.naturalWidth || image.width;
+  const imageHeight = image.naturalHeight || image.height;
+  if (!rig?.bones?.length || !rig.nodes?.length || !imageWidth || !imageHeight) return image;
 
-  const topologySignature = rig.bones.map(bone => `${bone.from}>${bone.to}`).join(',');
-  const signature = `${topologySignature}::` + rig.nodes.map(node => {
+  ensureWeights(rig);
+  const topologySignature = rig.bones.map(bone => `${bone.id}:${bone.from}>${bone.to}`).join(',');
+  // Weight painting increments a revision counter; avoid serializing all 625
+  // vertex records on every animation frame just to validate the render cache.
+  const weightSignature = Number(rig.weightsRevision) || 0;
+  const poseSignature = rig.nodes.map(node => {
     const pose = poses.get(node.id) ?? node;
     return `${pose.x.toFixed(5)},${pose.y.toFixed(5)}`;
   }).join('|');
-  const restSignature = `${topologySignature}::` + rig.nodes.map(node => `${node.x.toFixed(5)},${node.y.toFixed(5)}`).join('|');
+  const signature = `${topologySignature}::${weightSignature}::${poseSignature}`;
+  const restSignature = rig.nodes.map(node => `${node.x.toFixed(5)},${node.y.toFixed(5)}`).join('|');
   // Return the original bitmap while the rig is at rest. This avoids needless
   // mesh work and removes any chance of triangle seams on an untouched PNG.
-  if (signature === restSignature) return image;
+  if (poseSignature === restSignature) return image;
 
   let cached = meshBuffers.get(clipId);
-  if (cached?.signature === signature && cached.canvas.width === image.naturalWidth && cached.canvas.height === image.naturalHeight) {
+  if (cached?.signature === signature && cached.canvas.width === imageWidth && cached.canvas.height === imageHeight) {
     return cached.canvas;
   }
-  if (!cached || cached.canvas.width !== image.naturalWidth || cached.canvas.height !== image.naturalHeight) {
+  if (!cached || cached.canvas.width !== imageWidth || cached.canvas.height !== imageHeight) {
     const canvas = document.createElement('canvas');
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
+    canvas.width = imageWidth;
+    canvas.height = imageHeight;
     cached = { canvas, signature: '' };
     meshBuffers.set(clipId, cached);
   }
@@ -194,13 +197,15 @@ function renderDeformedImage(image, rig, poses, clipId) {
   c.clearRect(0, 0, off.width, off.height);
   c.imageSmoothingEnabled = true;
   c.imageSmoothingQuality = 'high';
-  const cols = 12, rows = 12, width = image.naturalWidth, height = image.naturalHeight;
+  const cols = SKIN_GRID, rows = SKIN_GRID, width = imageWidth, height = imageHeight;
+  const nodes = new Map(rig.nodes.map(node => [node.id, node]));
+  const segments = rig.bones.map(bone => ({ id: bone.id, start: nodes.get(bone.from), end: nodes.get(bone.to) })).filter(segment => segment.start && segment.end);
   const grid = [];
   for (let y = 0; y <= rows; y++) {
     const line = [];
     for (let x = 0; x <= cols; x++) {
       const u = x / cols, v = y / rows;
-      const deformed = skinPoint({ x: u, y: v }, rig, poses);
+      const deformed = skinPoint({ x: u, y: v }, rig, poses, segments);
       line.push({ x: deformed.x * width, y: deformed.y * height });
     }
     grid.push(line);
@@ -240,6 +245,53 @@ function renderDeformedImage(image, rig, poses, clipId) {
   return off;
 }
 
+
+function buildWeightHeatmap(image, rig, boneId, clipId) {
+  if (!rig?.bones?.some(bone => bone.id === boneId)) return null;
+  ensureWeights(rig);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  // Keep the preview overlay light even for very large source PNGs. It is
+  // drawn back over the full artwork size after its mesh deformation pass.
+  const previewScale = Math.min(1, 2048 / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * previewScale));
+  const height = Math.max(1, Math.round(sourceHeight * previewScale));
+  const revision = Number(rig.weightsRevision) || 0;
+  const signature = `${boneId}:${revision}:${sourceWidth}x${sourceHeight}:${width}x${height}`;
+  let cached = weightHeatmaps.get(clipId);
+  if (cached?.signature === signature) return cached.canvas;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const overlay = canvas.getContext('2d');
+  // Sample at 4x the skin grid and let the browser smooth the overlay when it
+  // is expanded to source resolution. This avoids a chunky 24-cell heat map.
+  const previewSize = SKIN_GRID * 4;
+  const sampleCanvas = document.createElement('canvas');
+  sampleCanvas.width = previewSize;
+  sampleCanvas.height = previewSize;
+  const sample = sampleCanvas.getContext('2d');
+  for (let y = 0; y < previewSize; y++) {
+    for (let x = 0; x < previewSize; x++) {
+      const weight = weightsAt(rig, (x + 0.5) / previewSize, (y + 0.5) / previewSize, SKIN_GRID)[boneId] || 0;
+      if (weight <= 0.015) continue;
+      sample.fillStyle = `rgba(64, 137, 184, ${Math.min(0.38, weight * 0.42)})`;
+      sample.fillRect(x, y, 1.2, 1.2);
+    }
+  }
+  overlay.imageSmoothingEnabled = true;
+  overlay.imageSmoothingQuality = 'high';
+  overlay.drawImage(sampleCanvas, 0, 0, width, height);
+  // Keep the influence wash inside the PNG's alpha silhouette.
+  overlay.globalCompositeOperation = 'destination-in';
+  overlay.drawImage(image, 0, 0, width, height);
+  overlay.globalCompositeOperation = 'source-over';
+  weightHeatmaps.set(clipId, { signature, canvas });
+  if (weightHeatmaps.size > 8) weightHeatmaps.delete(weightHeatmaps.keys().next().value);
+  return canvas;
+}
+
 function drawContext(active, rigTargetClipId = null) {
   const { clip, asset, image, localFrame } = active;
   const transform = active.transform;
@@ -257,6 +309,33 @@ function drawContext(active, rigTargetClipId = null) {
   ctx.globalAlpha = Math.max(0, Math.min(1, transform.opacity ?? 1));
   ctx.drawImage(output, -image.naturalWidth / 2, -image.naturalHeight / 2);
   ctx.globalAlpha = 1;
+
+  const paintMode = app.project.weightPaint?.enabled && app.project.selectedClipId === clip.id;
+  if (paintMode && rig?.bones?.length) {
+    const boneId = app.project.weightPaint.boneId;
+    const heatmap = buildWeightHeatmap(image, rig, boneId, clip.id);
+    if (heatmap) {
+      const deformedHeatmap = renderDeformedImage(heatmap, rig, poses, `${clip.id}:weight-preview:${boneId}`);
+      ctx.globalAlpha = Math.max(0, Math.min(1, transform.opacity ?? 1));
+      ctx.drawImage(deformedHeatmap, -image.naturalWidth / 2, -image.naturalHeight / 2, image.naturalWidth, image.naturalHeight);
+      ctx.globalAlpha = 1;
+    }
+  }
+  if (paintMode && rig?.bones?.length) {
+    const selectedBone = rig.bones.find(b => b.id === app.project.weightPaint.boneId);
+    if (selectedBone) {
+      const a = rig.nodes.find(n => n.id === selectedBone.from), b = rig.nodes.find(n => n.id === selectedBone.to);
+      if (a && b) {
+        const pa = poses.get(a.id) ?? a, pb = poses.get(b.id) ?? b;
+        // drawContext already has the artwork transform applied, so use local
+        // image coordinates here instead of applying the transform a second time.
+        ctx.save();
+        ctx.strokeStyle = 'rgba(65,132,178,.92)'; ctx.lineWidth = 2.4 / fit; ctx.setLineDash([6 / fit, 4 / fit]);
+        ctx.beginPath(); ctx.moveTo((pa.x-.5)*image.naturalWidth,(pa.y-.5)*image.naturalHeight); ctx.lineTo((pb.x-.5)*image.naturalWidth,(pb.y-.5)*image.naturalHeight); ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
 
   const isSelected = app.project.selectedClipId === clip.id;
   const showRig = !!rig?.nodes?.length && (isSelected || (active.clip.id === rigTargetClipId && ['rig', 'node'].includes(app.project.activeTool)));
@@ -311,6 +390,23 @@ function drawContext(active, rigTargetClipId = null) {
   }
 }
 
+function drawBrushCursor(active) {
+  const paint = app.project.weightPaint;
+  if (!paint?.enabled || app.project.activeTool !== 'node' || !active || !brushCursor || brushCursor.clipId !== active.clip.id || app.project.selectedClipId !== active.clip.id) return;
+  const fit = fitScale(active.image) * (active.transform?.scale ?? 1);
+  const radius = Math.max(0.005, Number(paint.radius) || 0.09);
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(brushCursor.point.x, brushCursor.point.y, radius * active.image.naturalWidth * fit, radius * active.image.naturalHeight * fit, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(83,139,178,.08)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(54,111,151,.9)';
+  ctx.lineWidth = 1.25;
+  ctx.setLineDash([4, 3]);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function draw() {
   if (!dirty) return;
   dirty = false;
@@ -327,6 +423,7 @@ function draw() {
   const selected = contexts.find(item => item.clip.id === app.project.selectedClipId) || contexts[contexts.length - 1];
   const rigTargetClipId = selected?.clip.id ?? null;
   for (const active of contexts) drawContext(active, rigTargetClipId);
+  drawBrushCursor(selected);
   document.getElementById('canvas-info').textContent = `${contexts.length} visible layer${contexts.length === 1 ? '' : 's'} · ${selected.asset.name} · ${selected.image.naturalWidth} × ${selected.image.naturalHeight}`;
 }
 
@@ -364,6 +461,21 @@ function onPointerDown(event) {
 
   const tool = app.project.activeTool;
   canvas.setPointerCapture(event.pointerId);
+
+  // Weight painting edits persistent per-vertex bone influences, never the artwork pixels.
+  if (app.project.weightPaint?.enabled && tool === 'node' && onImage) {
+    const rig = ensureRig(active.clip);
+    if (!rig.bones.length) { toast('Create at least one bone before painting weights.'); return; }
+    if (!rig.bones.some(bone => bone.id === app.project.weightPaint.boneId)) app.project.weightPaint.boneId = rig.bones[0].id;
+    if (!rig.weights || !Object.keys(rig.weights).length) rig.weights = autoWeights(rig);
+    pushUndo('Paint bone weights');
+    app.project.selectedClipId = active.clip.id;
+    app.project.selectedAssetId = active.asset.id;
+    pointerState = { type: 'paint-weights', pointerId: event.pointerId, clipId: active.clip.id };
+    brushCursor = { clipId: active.clip.id, point };
+    paintWeights(rig, screenToImage(point, active), app.project.weightPaint.boneId, { ...app.project.weightPaint, aspectY: active.image.naturalHeight / active.image.naturalWidth });
+    requestDraw(); return;
+  }
 
   // Node edits rig joints only. It deliberately does not require the pointer
   // to be inside the PNG bounds, since rig endpoints may sit just outside it.
@@ -432,14 +544,26 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
-  if (!pointerState) return;
   const point = stagePoint(event);
+  if (!pointerState) {
+    const active = activeImageContext();
+    brushCursor = app.project.weightPaint?.enabled && app.project.activeTool === 'node' && active
+      ? { clipId: active.clip.id, point } : null;
+    requestDraw();
+    return;
+  }
+  brushCursor = { clipId: pointerState.clipId, point };
   if (pointerState.type === 'pan') {
     app.project.viewPan = { x: pointerState.pan.x + point.x - pointerState.point.x, y: pointerState.pan.y + point.y - pointerState.point.y };
     requestDraw(); return;
   }
   const activeNow = activeImageContext();
   if (!activeNow || activeNow.clip.id !== pointerState.clipId) return;
+  if (pointerState.type === 'paint-weights') {
+    const rig = activeNow.clip.rig;
+    paintWeights(rig, screenToImage(point, activeNow), app.project.weightPaint.boneId, { ...app.project.weightPaint, aspectY: activeNow.image.naturalHeight / activeNow.image.naturalWidth });
+    requestDraw(); return;
+  }
   if (pointerState.type === 'move-node') {
     const normalized = screenToRigPoint(point, activeNow);
     if (app.project.autoKey !== false) {
@@ -497,6 +621,7 @@ canvas.addEventListener('pointerdown', onPointerDown);
 canvas.addEventListener('pointermove', onPointerMove);
 canvas.addEventListener('pointerup', onPointerUp);
 canvas.addEventListener('pointercancel', onPointerUp);
+canvas.addEventListener('pointerleave', () => { if (!pointerState) { brushCursor = null; requestDraw(); } });
 canvas.addEventListener('wheel', event => {
   event.preventDefault();
   app.project.viewZoom = Math.max(.15, Math.min(5, app.project.viewZoom * (event.deltaY < 0 ? 1.1 : .91)));

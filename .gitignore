@@ -4,3 +4,6 @@ src-tauri/target/
 *.jupiter.tmp
 .DS_Store
 Thumbs.db
+
+src-tauri/resources/ffmpeg/*
+!src-tauri/resources/ffmpeg/.gitkeep

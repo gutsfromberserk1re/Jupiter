@@ -57,7 +57,7 @@ export function createNode(clip, position, parentId = null) {
   const rig = ensureRig(clip);
   const node = { id: makeId('node'), name: `Joint ${rig.nodes.length + 1}`, x: position.x, y: position.y, keys: [] };
   rig.nodes.push(node);
-  if (parentId) rig.bones.push({ id: makeId('bone'), from: parentId, to: node.id });
+  if (parentId) { rig.bones.push({ id: makeId('bone'), from: parentId, to: node.id }); delete rig.weights; }
   return node;
 }
 
@@ -75,6 +75,7 @@ export function createBone(clip, fromId, toId) {
   if (hasPath(toId, fromId)) return null;
   const bone = { id: makeId('bone'), from: fromId, to: toId };
   rig.bones.push(bone);
+  delete rig.weights; // topology changed: regenerate automatic influences for the new bone
   return bone;
 }
 
@@ -82,6 +83,7 @@ export function deleteNode(clip, nodeId) {
   if (!clip?.rig) return;
   clip.rig.nodes = clip.rig.nodes.filter(node => node.id !== nodeId);
   clip.rig.bones = clip.rig.bones.filter(bone => bone.from !== nodeId && bone.to !== nodeId);
+  delete clip.rig.weights;
   if (app.project.selectedNodeId === nodeId) app.project.selectedNodeId = null;
 }
 

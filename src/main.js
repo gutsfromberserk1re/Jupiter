@@ -5,6 +5,8 @@ import { app, createProject, makeId, pushUndo, undo, redo, addClip, removeClip, 
 import { loadImageAsset, refreshStage, setTool, renderStageNow } from './modules/stage.js';
 import { evaluateNode, setNodePose, evaluateClipTransform, setClipTransformValue, TRANSFORM_PROPERTIES, deleteNode } from './modules/rig.js';
 import { zoomTimeline, seekFrame, refreshTimeline, updateTimelinePlayhead, handleTimelineDrop, setAssetDragState } from './modules/timeline.js';
+import { detectMediaKind, mediaMime, nativeAssetBase64, setAssetTransfer, hasAssetTransferType, readAssetTransfer } from './modules/media-io.js';
+import { autoWeights, ensureWeights } from './modules/skinning.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -15,6 +17,11 @@ let playbackStartFrame = 0;
 let projectPath = null;
 let spaceHeld = false;
 let currentAudio = new Map();
+let activeDraggedAssetId = null;
+let mediaImportBusy = false;
+let mediaPointerDrag = null;
+let mediaDragGhost = null;
+let suppressMediaClick = false;
 
 window.jupiterToast = message => {
   const region = $('#toast-region');
@@ -35,73 +42,198 @@ function fileToDataUrl(file) {
     const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file);
   });
 }
-function imageDimensions(dataUrl) {
-  return new Promise(resolve => { const image = new Image(); image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight }); image.onerror = () => resolve({ width: 0, height: 0 }); image.src = dataUrl; });
-}
 function audioDuration(dataUrl) {
   return new Promise(resolve => {
-    const audio = new Audio(); audio.preload = 'metadata'; audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) ? audio.duration : 5); audio.onerror = () => resolve(5); audio.src = dataUrl;
+    const audio = new Audio(); audio.preload = 'metadata';
+    audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 5);
+    audio.onerror = () => resolve(5); audio.src = dataUrl;
   });
+}
+async function resolveAudioDuration(dataUrl, sourcePath = null) {
+  if (tauriMode && sourcePath) {
+    try {
+      const probe = await invoke('probe_media', { path: sourcePath });
+      if (Number.isFinite(probe.duration) && probe.duration > 0) return probe.duration;
+    } catch (error) {
+      console.warn('FFprobe could not read audio metadata; using browser metadata instead.', error);
+    }
+  }
+  return audioDuration(dataUrl);
+}
+
+function setMediaImportStatus(text) { const status = $('#media-import-status'); if (status) status.textContent = text; }
+
+function activateInspectorTab(tab) {
+  app.project.inspectorTab = tab;
+  $$('[data-inspector-tab]').forEach(button => {
+    const active = button.dataset.inspectorTab === tab;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  $('#inspector-values').classList.toggle('hidden', tab !== 'values');
+  $('#inspector-media').classList.toggle('hidden', tab !== 'media');
 }
 
 async function importFiles(fileList, autoInsert = false) {
-  const files = [...fileList];
-  for (const file of files) {
-    if (!file.type.startsWith('image/') && !file.type.startsWith('audio/')) continue;
+  const files = [...(fileList || [])];
+  if (!files.length) return;
+  let imported = 0;
+  let undoPushed = false;
+  const batchKeys = new Set();
+  setMediaImportStatus(`IMPORTING 0/${files.length}`);
+  for (const [fileIndex, file] of files.entries()) {
+    const type = detectMediaKind(file.name, file.type);
+    if (!type) {
+      window.jupiterToast(`Unsupported media: ${file.name}`);
+      continue;
+    }
+    const sourceKey = `${file.name.toLowerCase()}|${file.size}|${file.lastModified}`;
+    if (batchKeys.has(sourceKey) || app.project.assets.some(asset => asset.sourceKey === sourceKey)) {
+      window.jupiterToast(`Already in Media: ${file.name}`);
+      continue;
+    }
+    batchKeys.add(sourceKey);
+    setMediaImportStatus(`IMPORTING ${fileIndex + 1}/${files.length}`);
     try {
       const dataUrl = await fileToDataUrl(file);
-      const image = file.type.startsWith('image/');
-      const metadata = image ? await imageDimensions(dataUrl) : { width: 0, height: 0 };
-      const duration = image ? null : await audioDuration(dataUrl);
+      const mime = mediaMime(file.name, file.type, type);
+      const duration = type === 'audio' ? await resolveAudioDuration(dataUrl) : null;
       const asset = {
-        id: makeId('asset'), name: file.name, type: image ? 'image' : 'audio', mime: file.type || (image ? 'image/png' : 'audio/mpeg'),
-        dataUrl, width: metadata.width, height: metadata.height, duration,
+        id: makeId('asset'), name: file.name, type, mime, dataUrl,
+        width: 0, height: 0, duration, sourceKey,
       };
-      pushUndo('Import media');
+      if (type === 'image') {
+        const decoded = await loadImageAsset(asset);
+        if (!decoded) throw new Error('The image preview could not be decoded.');
+        asset.width = decoded.naturalWidth; asset.height = decoded.naturalHeight;
+      }
+      if (!undoPushed) { pushUndo('Import media'); undoPushed = true; }
       app.project.assets.push(asset);
       app.project.selectedAssetId = asset.id;
-      if (image) await loadImageAsset(asset);
       if (autoInsert) addClip(asset.id);
-    } catch (error) { window.jupiterToast(`Couldn't import ${file.name}: ${error.message || error}`); }
+      imported += 1;
+    } catch (error) {
+      window.jupiterToast(`Couldn't import ${file.name}: ${error.message || error}`);
+    }
   }
-  if (files.length) app.project.inspectorTab = autoInsert ? 'values' : 'media';
-  app.renderAll();
+  setMediaImportStatus(imported ? `${imported} ADDED` : 'READY');
+  if (imported) {
+    activateInspectorTab(autoInsert ? 'values' : 'media');
+    app.renderAll();
+    window.jupiterToast(`${imported} media item${imported === 1 ? '' : 's'} imported.`);
+  }
 }
 
 async function importNativePaths(paths, autoInsert = false) {
-  for (const path of paths) {
+  const list = [...new Set((paths || []).filter(Boolean))];
+  if (!list.length) return;
+  let imported = 0;
+  let undoPushed = false;
+  const batchPaths = new Set();
+  setMediaImportStatus(`IMPORTING 0/${list.length}`);
+  for (const [pathIndex, path] of list.entries()) {
     try {
+      const pathKey = path.toLowerCase();
+      if (batchPaths.has(pathKey) || app.project.assets.some(asset => asset.sourcePath?.toLowerCase() === pathKey)) {
+        window.jupiterToast(`Already in Media: ${path.split(/[\\/]/).pop()}`);
+        continue;
+      }
+      batchPaths.add(pathKey);
+      setMediaImportStatus(`IMPORTING ${pathIndex + 1}/${list.length}`);
       const assetData = await invoke('read_asset', { path });
-      const type = assetData.mime.startsWith('image/') ? 'image' : assetData.mime.startsWith('audio/') ? 'audio' : null;
+      const type = detectMediaKind(assetData.name, assetData.mime);
       if (!type) { window.jupiterToast(`Unsupported media: ${assetData.name}`); continue; }
-      const dataUrl = `data:${assetData.mime};base64,${assetData.data_base64}`;
-      const metadata = type === 'image' ? await imageDimensions(dataUrl) : { width: 0, height: 0 };
-      const duration = type === 'audio' ? await audioDuration(dataUrl) : null;
-      const asset = { id: makeId('asset'), name: assetData.name, type, mime: assetData.mime, dataUrl, width: metadata.width, height: metadata.height, duration };
-      pushUndo('Import media'); app.project.assets.push(asset); app.project.selectedAssetId = asset.id;
-      if (type === 'image') await loadImageAsset(asset);
+      const mime = mediaMime(assetData.name, assetData.mime, type);
+      const encoded = nativeAssetBase64(assetData);
+      const dataUrl = `data:${mime};base64,${encoded}`;
+      const duration = type === 'audio' ? await resolveAudioDuration(dataUrl, path) : null;
+      const asset = { id: makeId('asset'), name: assetData.name, type, mime, dataUrl, width: 0, height: 0, duration, sourcePath: path };
+      if (type === 'image') {
+        const decoded = await loadImageAsset(asset);
+        if (!decoded) throw new Error('The image preview could not be decoded.');
+        asset.width = decoded.naturalWidth; asset.height = decoded.naturalHeight;
+      }
+      if (!undoPushed) { pushUndo('Import media'); undoPushed = true; }
+      app.project.assets.push(asset);
+      app.project.selectedAssetId = asset.id;
       if (autoInsert) addClip(asset.id);
-    } catch (error) { window.jupiterToast(`Couldn't import file: ${String(error).slice(0, 120)}`); }
+      imported += 1;
+    } catch (error) {
+      window.jupiterToast(`Couldn't import ${path.split(/[\\/]/).pop()}: ${String(error).slice(0, 120)}`);
+    }
   }
-  if (paths.length) app.project.inspectorTab = autoInsert ? 'values' : 'media';
-  app.renderAll();
+  setMediaImportStatus(imported ? `${imported} ADDED` : 'READY');
+  if (imported) {
+    activateInspectorTab(autoInsert ? 'values' : 'media');
+    app.renderAll();
+    window.jupiterToast(`${imported} media item${imported === 1 ? '' : 's'} imported.`);
+  }
+}
+
+async function openMediaPicker() {
+  if (mediaImportBusy) return;
+  mediaImportBusy = true;
+  const button = $('#media-import-button');
+  if (button) { button.disabled = true; button.textContent = 'Opening…'; }
+  try {
+    if (tauriMode) {
+      try {
+        const selected = await open({
+          multiple: true,
+          directory: false,
+          filters: [
+            { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'avif', 'svg', 'ico'] },
+            { name: 'Audio', extensions: ['mp3', 'wav', 'flac', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'aif', 'aiff', 'wma', 'mid', 'midi'] },
+            { name: 'All supported media', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'avif', 'svg', 'ico', 'mp3', 'wav', 'flac', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'aif', 'aiff', 'wma', 'mid', 'midi'] },
+          ],
+        });
+        const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+        if (paths.length) await importNativePaths(paths, false);
+      } catch (nativePickerError) {
+        console.error('Native media picker failed; opening the WebView file picker.', nativePickerError);
+        window.jupiterToast('Native picker unavailable. Opening the standard file picker…');
+        $('#media-input').click();
+      }
+    } else {
+      $('#media-input').click();
+    }
+  } catch (error) {
+    window.jupiterToast(`Media picker failed: ${error.message || error}`);
+  } finally {
+    mediaImportBusy = false;
+    if (button) { button.disabled = false; button.textContent = '＋ Add media'; }
+  }
+}
+
+async function refreshFfmpegStatus() {
+  const status = $('#ffmpeg-status');
+  if (!status) return;
+  if (!tauriMode) { status.textContent = 'DESKTOP CODEC'; return; }
+  try {
+    const info = await invoke('ffmpeg_status');
+    status.textContent = info.available ? `FFMPEG READY${info.ffprobeAvailable ? ' · PROBE' : ''}` : 'FFMPEG NOT FOUND';
+    status.title = info.available ? `FFmpeg: ${info.ffmpegPath}` : 'Run npm run setup:ffmpeg to install the bundled codec runtime.';
+  } catch {
+    status.textContent = 'FFMPEG CHECK FAILED';
+  }
 }
 
 function renderMedia() {
   const container = $('#media-list');
   $('#media-count').textContent = String(app.project.assets.length);
+  const inlineCount = $('#media-count-inline'); if (inlineCount) inlineCount.textContent = String(app.project.assets.length);
   if (!app.project.assets.length) {
-    container.innerHTML = '<div class="media-empty media-import-prompt" id="media-import-prompt"><span class="media-plus">＋</span><strong>Import media</strong><small>Double-click or right-click here</small></div>';
+    container.innerHTML = '<div class="media-empty media-import-prompt" id="media-import-prompt" role="button" tabindex="0"><span class="media-plus">＋</span><strong>Import media</strong><small>Click, double-click or drop files here</small></div>';
     return;
   }
   container.innerHTML = '';
   for (const asset of app.project.assets) {
     const card = document.createElement('div');
     card.className = `media-card${asset.id === app.project.selectedAssetId ? ' selected' : ''}`;
-    card.draggable = true; card.dataset.assetId = asset.id;
+    card.draggable = false; card.dataset.assetId = asset.id;
     const thumb = document.createElement('div'); thumb.className = 'media-thumb';
     if (asset.type === 'image') {
-      const img = document.createElement('img'); img.src = asset.dataUrl; img.alt = ''; thumb.appendChild(img);
+      const img = document.createElement('img'); img.src = asset.dataUrl; img.alt = ''; img.draggable = false; thumb.appendChild(img);
     } else {
       thumb.textContent = '♫';
     }
@@ -109,23 +241,15 @@ function renderMedia() {
     const meta = document.createElement('small');
     meta.textContent = asset.type === 'image' ? `${asset.width} × ${asset.height}` : `${asset.duration?.toFixed(1) ?? '—'} sec`;
     card.append(thumb, name, meta);
-    card.addEventListener('click', () => {
+    card.addEventListener('click', event => {
+      if (suppressMediaClick) { event.preventDefault(); event.stopPropagation(); suppressMediaClick = false; return; }
       app.project.selectedAssetId = asset.id;
       app.project.selectedClipId = null;
       app.project.selectedNodeId = null;
-      app.project.inspectorTab = 'media';
-      $$('[data-inspector-tab]').forEach(button => button.classList.toggle('active', button.dataset.inspectorTab === 'media'));
-      $('#inspector-values').classList.add('hidden'); $('#inspector-media').classList.remove('hidden');
+      activateInspectorTab('media');
       app.renderInspector(); renderMedia();
     });
     card.addEventListener('dblclick', () => addClip(asset.id));
-    card.addEventListener('dragstart', event => {
-      event.dataTransfer.setData('application/x-jupiter-asset', asset.id);
-      event.dataTransfer.setData('application/x-jupiter-kind', asset.type === 'audio' ? 'audio' : 'video');
-      event.dataTransfer.setData(asset.type === 'audio' ? 'application/x-jupiter-audio' : 'application/x-jupiter-video', asset.id);
-      event.dataTransfer.effectAllowed = 'copy';
-    });
-    card.addEventListener('dragend', () => setAssetDragState(null, false));
     container.appendChild(card);
   }
 }
@@ -409,6 +533,31 @@ function renderInspector() {
     const rigInfo = document.createElement('section'); rigInfo.className = 'property-section';
     rigInfo.innerHTML = `<h3>RIG</h3><div class="property-row"><label>Joints</label><span>${rig?.nodes?.length ?? 0}</span><span></span></div><div class="property-row"><label>Limbs</label><span>${rig?.bones?.length ?? 0}</span><span></span></div>`;
     controlsColumn.append(section, rigInfo);
+    if (rig?.bones?.length) {
+      app.project.weightPaint ??= { enabled: false, boneId: rig.bones[0].id, radius: .09, strength: .35, mode: 'add' };
+      const paint = app.project.weightPaint;
+      if (!rig.bones.some(b => b.id === paint.boneId)) paint.boneId = rig.bones[0].id;
+      const skinSection = document.createElement('section'); skinSection.className = 'property-section weight-paint-section';
+      skinSection.innerHTML = '<h3 class="skin-section-title"><span>SKINNING</span><small>0.2.1</small></h3><div class="skin-toggle-row"><div><strong>Weight painting</strong><span>Paint bone influence on the artwork</span></div><button type="button" class="small-action" id="weight-paint-toggle" aria-pressed="false"></button></div><div class="property-row"><label for="weight-bone">Influence bone</label><select id="weight-bone"></select></div><div class="property-row"><label for="weight-mode">Brush mode</label><select id="weight-mode"><option value="add">Add influence</option><option value="subtract">Subtract</option><option value="smooth">Smooth</option></select></div><div class="property-row"><label for="weight-radius">Brush radius <output id="weight-radius-value">9%</output></label><input id="weight-radius" type="range" min="2" max="30" step="1"></div><div class="property-row"><label for="weight-strength">Strength <output id="weight-strength-value">35%</output></label><input id="weight-strength" type="range" min="5" max="100" step="5"></div><div class="property-actions"><button type="button" class="small-action" id="auto-weights">Regenerate auto weights</button><button type="button" class="small-action" id="normalize-weights">Normalize</button></div><p class="property-hint">Choose a bone, turn painting on, then drag over the image with the Node tool. The brush outline shows the affected area; blue shading previews the selected bone influence.</p>';
+      const toggle = skinSection.querySelector('#weight-paint-toggle');
+      const syncToggle = () => { toggle.textContent = paint.enabled ? 'Painting on' : 'Enable'; toggle.classList.toggle('active', paint.enabled); toggle.setAttribute('aria-pressed', String(!!paint.enabled)); };
+      syncToggle();
+      const boneSelect = skinSection.querySelector('#weight-bone');
+      for (const bone of rig.bones) { const a = rig.nodes.find(n => n.id === bone.from), b = rig.nodes.find(n => n.id === bone.to); const option = document.createElement('option'); option.value = bone.id; option.textContent = `${a?.name || 'Joint'} → ${b?.name || 'Joint'}`; boneSelect.appendChild(option); }
+      boneSelect.value = paint.boneId; skinSection.querySelector('#weight-mode').value = paint.mode || 'add';
+      const radiusInput = skinSection.querySelector('#weight-radius'), strengthInput = skinSection.querySelector('#weight-strength');
+      const radiusValue = skinSection.querySelector('#weight-radius-value'), strengthValue = skinSection.querySelector('#weight-strength-value');
+      radiusInput.value = Math.round((paint.radius ?? .09) * 100); strengthInput.value = Math.round((paint.strength ?? .35) * 100);
+      radiusValue.textContent = `${radiusInput.value}%`; strengthValue.textContent = `${strengthInput.value}%`;
+      toggle.addEventListener('click', () => { paint.enabled = !paint.enabled; app.project.activeTool = 'node'; syncToggle(); app.renderToolbar(); app.drawStage(); });
+      boneSelect.addEventListener('change', () => { paint.boneId = boneSelect.value; app.drawStage(); });
+      skinSection.querySelector('#weight-mode').addEventListener('change', e => { paint.mode = e.target.value; });
+      radiusInput.addEventListener('input', e => { paint.radius = Number(e.target.value) / 100; radiusValue.textContent = `${e.target.value}%`; app.drawStage(); });
+      strengthInput.addEventListener('input', e => { paint.strength = Number(e.target.value) / 100; strengthValue.textContent = `${e.target.value}%`; });
+      skinSection.querySelector('#auto-weights').addEventListener('click', () => { pushUndo('Regenerate automatic weights'); rig.weights = autoWeights(rig); rig.weightsRevision = (Number(rig.weightsRevision) || 0) + 1; app.renderAll(); });
+      skinSection.querySelector('#normalize-weights').addEventListener('click', () => { pushUndo('Normalize skin weights'); ensureWeights(rig); rig.weightsRevision = (Number(rig.weightsRevision) || 0) + 1; app.renderAll(); });
+      controlsColumn.appendChild(skinSection);
+    }
     const hierarchy = rigHierarchySection(clip); if (hierarchy) controlsColumn.appendChild(hierarchy);
     renderGraphEditor(graphColumn, clip, node || null);
   } else if (!node && asset) {
@@ -683,10 +832,8 @@ $('#project-menu-button').addEventListener('click', event => { event.stopPropaga
 $('#project-menu').addEventListener('click', event => { const button = event.target.closest('[data-action]'); if (button) runMenuAction(button.dataset.action); });
 document.addEventListener('pointerdown', event => { if (!event.target.closest('#project-menu') && !event.target.closest('#project-menu-button')) closeMenu(); });
 $$('[data-inspector-tab]').forEach(button => button.addEventListener('click', () => {
-  app.project.inspectorTab = button.dataset.inspectorTab;
-  $$('[data-inspector-tab]').forEach(item => item.classList.toggle('active', item === button));
-  $('#inspector-values').classList.toggle('hidden', app.project.inspectorTab !== 'values');
-  $('#inspector-media').classList.toggle('hidden', app.project.inspectorTab !== 'media');
+  activateInspectorTab(button.dataset.inspectorTab);
+  app.renderInspector();
 }));
 
 $('#inspector-collapse').addEventListener('click', () => toggleInspector());
@@ -710,15 +857,81 @@ $('#png-input').addEventListener('change', event => { importFiles(event.target.f
 $('#media-input').addEventListener('change', event => { importFiles(event.target.files); event.target.value = ''; });
 $('#audio-input').addEventListener('change', event => { importFiles(event.target.files); event.target.value = ''; });
 $('#project-input').addEventListener('change', event => { if (event.target.files?.[0]) openProjectFromFile(event.target.files[0]); event.target.value = ''; });
+$('#media-import-button').addEventListener('click', event => { event.stopPropagation(); openMediaPicker(); });
 
-// Media is the single import surface: double-click or right-click its empty area,
-// or drop files directly into the panel. Existing cards still double-click to append.
+// Use a pointer-driven internal drag instead of the WebView's custom DataTransfer
+// MIME path. WebView2 can strip custom drag types; pointer dragging is deterministic.
+const mediaList = $('#media-list');
+function clearMediaDrag() {
+  mediaDragGhost?.remove(); mediaDragGhost = null;
+  document.querySelectorAll('.drop-target').forEach(element => element.classList.remove('drop-target'));
+  mediaPointerDrag = null; activeDraggedAssetId = null;
+  setAssetDragState(null, false);
+}
+mediaList.addEventListener('pointerdown', event => {
+  if (event.button !== 0) return;
+  const card = event.target.closest('.media-card');
+  if (!card) return;
+  const asset = findAsset(card.dataset.assetId);
+  if (!asset) return;
+  mediaPointerDrag = { assetId: asset.id, asset, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, started: false };
+});
+window.addEventListener('pointermove', event => {
+  const drag = mediaPointerDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+  if (!drag.started && distance < 7) return;
+  if (!drag.started) {
+    drag.started = true;
+    activeDraggedAssetId = drag.assetId;
+    suppressMediaClick = true;
+    setAssetDragState(drag.asset.type === 'audio' ? 'audio' : 'video', true);
+    mediaDragGhost = document.createElement('div');
+    mediaDragGhost.className = 'media-drag-ghost';
+    const thumb = document.createElement('span'); thumb.className = 'ghost-thumb';
+    if (drag.asset.type === 'image') { const image = document.createElement('img'); image.src = drag.asset.dataUrl; image.alt = ''; thumb.appendChild(image); }
+    else thumb.textContent = '♫';
+    const label = document.createElement('strong'); label.textContent = drag.asset.name;
+    mediaDragGhost.append(thumb, label); document.body.appendChild(mediaDragGhost);
+  }
+  event.preventDefault();
+  mediaDragGhost.style.left = `${event.clientX}px`;
+  mediaDragGhost.style.top = `${event.clientY}px`;
+  document.querySelectorAll('.drop-target').forEach(element => element.classList.remove('drop-target'));
+  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('.track-lane, .new-layer-drop');
+  if (target) target.classList.add('drop-target');
+}, { passive: false });
+window.addEventListener('pointerup', event => {
+  const drag = mediaPointerDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  if (drag.started) {
+    const rect = timelineBody.getBoundingClientRect();
+    const insideTimeline = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    if (insideTimeline) handleTimelineDrop(drag.assetId, event.clientX, event.clientY);
+    else suppressMediaClick = false;
+    event.preventDefault();
+    setTimeout(() => { suppressMediaClick = false; }, 0);
+  }
+  clearMediaDrag();
+}, true);
+window.addEventListener('pointercancel', clearMediaDrag, true);
+
+// Media is imported from the Inspector's Media tab. It supports an explicit
+// button, clicking the empty state, double-click/right-click, and OS file drop.
 const mediaPanel = $('#inspector-media');
+mediaPanel.addEventListener('click', event => {
+  if (event.target.closest('#media-import-prompt')) openMediaPicker();
+});
+mediaPanel.addEventListener('keydown', event => {
+  if ((event.key === 'Enter' || event.key === ' ') && event.target.closest('#media-import-prompt')) {
+    event.preventDefault(); openMediaPicker();
+  }
+});
 mediaPanel.addEventListener('dblclick', event => {
-  if (!event.target.closest('.media-card')) $('#media-input').click();
+  if (!event.target.closest('.media-card, #media-import-prompt')) openMediaPicker();
 });
 mediaPanel.addEventListener('contextmenu', event => {
-  event.preventDefault(); $('#media-input').click();
+  if (!event.target.closest('.media-card')) { event.preventDefault(); openMediaPicker(); }
 });
 mediaPanel.addEventListener('dragover', event => {
   if (event.dataTransfer?.types?.includes('Files')) { event.preventDefault(); mediaPanel.classList.add('media-drop-active'); }
@@ -727,24 +940,30 @@ mediaPanel.addEventListener('dragleave', event => {
   if (!mediaPanel.contains(event.relatedTarget)) mediaPanel.classList.remove('media-drop-active');
 });
 mediaPanel.addEventListener('drop', event => {
-  if (event.dataTransfer?.files?.length) { event.preventDefault(); event.stopPropagation(); mediaPanel.classList.remove('media-drop-active'); importFiles(event.dataTransfer.files, false); }
+  if (event.dataTransfer?.files?.length) {
+    event.preventDefault(); event.stopPropagation(); mediaPanel.classList.remove('media-drop-active');
+    importFiles(event.dataTransfer.files, false);
+  }
 });
 
 const timelineBody = $('#timeline-body');
 timelineBody.addEventListener('dragover', event => {
-  if (!event.dataTransfer.types.includes('application/x-jupiter-asset')) return;
+  if (!hasAssetTransferType(event.dataTransfer?.types)) return;
   event.preventDefault(); event.dataTransfer.dropEffect = 'copy';
-  const kind = event.dataTransfer.types.includes('application/x-jupiter-audio') ? 'audio' : 'video';
+  const types = Array.from(event.dataTransfer.types || []);
+  const kind = types.includes('application/x-jupiter-audio') || app.project.assets.find(item => item.id === activeDraggedAssetId)?.type === 'audio' ? 'audio' : 'video';
   setAssetDragState(kind, true);
 });
 timelineBody.addEventListener('dragleave', event => {
   if (!timelineBody.contains(event.relatedTarget)) setAssetDragState(null, false);
 });
 timelineBody.addEventListener('drop', event => {
-  event.preventDefault();
-  const assetId = event.dataTransfer.getData('application/x-jupiter-asset');
+  event.preventDefault(); event.stopPropagation();
+  const assetId = readAssetTransfer(event.dataTransfer, activeDraggedAssetId);
   if (assetId) handleTimelineDrop(assetId, event.clientX, event.clientY);
-  else setAssetDragState(null, false);
+  else window.jupiterToast('Could not identify the dragged media. Try dragging the asset card itself.');
+  setAssetDragState(null, false);
+  activeDraggedAssetId = null;
 });
 
 const canvasWrap = $('#canvas-wrap');
@@ -791,4 +1010,5 @@ if (tauriMode) {
 }
 
 renderAll();
+refreshFfmpegStatus();
 

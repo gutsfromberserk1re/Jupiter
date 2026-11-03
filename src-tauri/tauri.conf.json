@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Jupiter",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "identifier": "com.jupiter.animator",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Jupiter \u00b7 2D Animation Studio",
+        "title": "Jupiter · 2D Animation Studio",
         "width": 1440,
         "height": 900,
         "minWidth": 1120,
@@ -39,6 +39,9 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "resources/ffmpeg/": "ffmpeg/"
+    }
   }
 }

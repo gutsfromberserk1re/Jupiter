@@ -1,0 +1,1 @@
+FFmpeg runtime binaries are downloaded by scripts/setup-ffmpeg.ps1 before desktop development/builds.
