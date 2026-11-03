@@ -38,14 +38,21 @@ jobs:
       - name: Install bundled FFmpeg runtime
         run: npm run setup:ffmpeg
 
-      - name: Build Windows app
-        run: npm run tauri build
+      - name: Build standalone Windows executable
+        run: npm run tauri build -- --no-bundle
 
-      - name: Upload installers
+      - name: Prepare FFmpeg runtime beside executable
+        shell: pwsh
+        run: |
+          $runtimeTarget = "src-tauri/target/release/ffmpeg"
+          New-Item -ItemType Directory -Path $runtimeTarget -Force | Out-Null
+          Copy-Item -Path "src-tauri/resources/ffmpeg/*" -Destination $runtimeTarget -Recurse -Force
+
+      - name: Upload standalone test build
         uses: actions/upload-artifact@v4
         with:
-          name: Jupiter-Windows-Installers
+          name: Jupiter-Windows-Test-Build
           path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/jupiter.exe
+            src-tauri/target/release/ffmpeg/**
           if-no-files-found: error

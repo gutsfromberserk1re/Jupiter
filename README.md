@@ -74,7 +74,7 @@ npm run tauri build
 
 For a browser-only UI/interaction preview without the Rust shell, double-click `run-web-preview.bat` or run `npm run dev`, then open `http://127.0.0.1:1420`.
 
-The Windows desktop build bundles FFmpeg 9.0.2 and FFprobe from an LGPL shared build. `run-jupiter-dev.bat` and the GitHub Actions workflow run `npm run setup:ffmpeg` automatically; for a manual build, run that command before `npm run tauri dev` or `npm run tauri build`. The setup downloads the executables and their runtime DLLs into `src-tauri/resources/ffmpeg/`; Tauri includes that directory in the Windows installers. See `FFMPEG-NOTICE.md` for licensing and upstream details. Rust dependency outputs are cached between CI runs.
+The Windows desktop build uses FFmpeg 9.0.2 and FFprobe from an LGPL shared build. `run-jupiter-dev.bat` and the GitHub Actions workflows run `npm run setup:ffmpeg` automatically; for a manual build, run that command before `npm run tauri dev` or `npm run tauri build`. The workflows publish a standalone `jupiter.exe` test build with its `ffmpeg` runtime folder beside it, without creating an installer. Local `npm run tauri build` still creates the configured NSIS/MSI installers. See `FFMPEG-NOTICE.md` for licensing and upstream details. Rust dependency outputs are cached between CI runs.
 
 ## Current implementation limits
 
