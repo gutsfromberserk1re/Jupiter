@@ -24,11 +24,18 @@
     </header>
 
     <div class="commandbar glass-panel">
-      <div class="command-group">
+      <div class="command-group command-leading">
+        <button class="command-button import-command" id="quick-import" title="Import media" aria-label="Import media"><span class="import-plus">＋</span> Import PNG</button>
+        <span class="command-divider"></span>
         <button class="command-button square" id="undo-button" title="Undo · Ctrl+Z" aria-label="Undo" disabled>↶</button>
         <button class="command-button square" id="redo-button" title="Redo · Ctrl+Y" aria-label="Redo" disabled>↷</button>
       </div>
       <div class="command-spacer"></div>
+      <div class="quick-tools" role="toolbar" aria-label="Quick editing tools">
+        <button data-tool="select">Select</button><button data-tool="move">Move</button><button data-tool="rig">Rig</button><button data-tool="node">Node</button>
+      </div>
+      <button class="command-button fit-command" id="fit-canvas" title="Fit canvas">Fit Canvas ⛶</button>
+      <span class="command-divider command-end-divider"></span>
       <button class="export-placeholder" id="export-placeholder" title="Export (coming later)" aria-label="Export">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/></svg>
       </button>
@@ -44,10 +51,10 @@
         </button>
         <div class="tool-rail-divider"></div>
         <button class="tool-button" data-tool="rig" title="Rig (R)" aria-label="Rig tool">
-          <svg class="tool-svg rig-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19L11.5 12L19 5"/><circle cx="5" cy="19" r="2.4"/><circle cx="11.5" cy="12" r="2.4"/><circle cx="19" cy="5" r="2.4"/><path d="M14.5 4.5L19.5 2.7L17.7 7.7"/></svg><span>Rig</span><kbd>R</kbd>
+          <svg class="tool-svg rig-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19L12 12L19 5M12 12L19 19"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/></svg><span>Rig</span><kbd>R</kbd>
         </button>
         <button class="tool-button" data-tool="node" title="Node (N)" aria-label="Node tool">
-          <svg class="tool-svg node-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 2.8L17.2 12.6L11.1 13.5L8.6 20.7Z"/><path d="M12.4 14.8L18.6 21"/><circle cx="19" cy="21" r="1.6"/></svg><span>Node</span><kbd>N</kbd>
+          <svg class="tool-svg node-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3.5L18.3 13.2L11.5 14.4L8.7 20.5Z"/></svg><span>Node</span><kbd>N</kbd>
         </button>
       </aside>
 

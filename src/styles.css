@@ -368,6 +368,88 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .media-drag-ghost img { width:100%; height:100%; object-fit:cover; }
 .track-lane.drop-target, .new-layer-drop.drop-target { outline:2px solid #75a8d2; outline-offset:-2px; background-color:#e2eff9; }
 
+/* Spacious, light editor skin inspired by the supplied Jupiter reference. */
+:root { --label-width: 126px; --timeline-row: 42px; }
+body { background:linear-gradient(145deg,#e8ebf0,#dfe4ea 55%,#e9edf2); }
+#app-shell { grid-template-rows:58px 54px minmax(250px,1fr) minmax(220px,30vh); }
+.glass-panel { border-color:rgba(255,255,255,.9); box-shadow:0 4px 18px rgba(38,53,69,.075),inset 0 1px 0 #fff; backdrop-filter:blur(22px) saturate(1.08); }
+.titlebar { padding:0 20px; background:rgba(250,251,253,.86); }
+.brand-zone { gap:12px; }
+.brand-orb { width:34px;height:34px; font-size:13px; }
+.brand-copy strong { font:700 16px/1.05 Inter,system-ui,sans-serif; letter-spacing:0; color:#202b39; }
+.brand-copy span { font:500 12px/1.1 Inter,system-ui,sans-serif; letter-spacing:0; }
+.title-divider { height:27px; margin-inline:14px 9px; }
+.project-name { font-size:15px; color:#252f3d; }
+.window-controls { gap:12px; }
+.window-dot { width:21px;height:21px; border:2px solid rgba(255,255,255,.75); box-shadow:0 2px 5px rgba(30,42,55,.2); }
+.window-dot.minimize { background:#21c66a; }.window-dot.maximize { background:#f5bf17; }.window-dot.close { background:#ed3d3f; }
+.commandbar { gap:10px; padding:0 16px; background:rgba(248,250,252,.76); }
+.command-leading { gap:8px; }
+.command-divider { width:1px;height:27px;margin:0 5px;background:rgba(103,119,136,.2); }
+.command-button { height:40px; min-width:40px; padding:0 15px; border:1px solid rgba(136,151,166,.2); border-radius:13px; background:rgba(255,255,255,.67); box-shadow:0 2px 6px rgba(38,53,69,.055); color:#344254; font-size:14px; }
+.command-button.square { width:44px;height:42px;font-size:23px; }
+.import-command { display:flex;align-items:center;gap:8px;font-weight:600; }
+.import-plus { font-size:20px;line-height:1; }
+.quick-tools { display:flex;align-items:center;padding:3px;border:1px solid rgba(134,150,167,.2);border-radius:14px;background:rgba(226,231,238,.65);box-shadow:0 2px 6px rgba(38,53,69,.06); }
+.quick-tools button { min-width:69px;height:36px;padding:0 13px;border:0;border-radius:11px;background:transparent;color:#566273;cursor:pointer;font-size:14px; }
+.quick-tools button:hover { background:rgba(255,255,255,.65); }
+.quick-tools button.active { color:#184d89;background:linear-gradient(#e9f3ff,#d5e8ff);box-shadow:0 1px 4px rgba(52,105,162,.12);font-weight:650; }
+.fit-command { font-weight:600;white-space:nowrap; }
+.export-placeholder { width:34px;height:34px;border-radius:10px;color:#596778; }
+.editor-layout { grid-template-columns:92px minmax(0,1fr) minmax(320px,21vw);gap:10px;padding:8px 10px 8px; }
+.tool-rail { align-self:stretch;gap:7px;padding:11px 6px;border-radius:19px;background:rgba(250,252,254,.86); }
+.tool-button { width:72px;min-height:77px;gap:5px;border-radius:14px;color:#526071; }
+.tool-button.active { border-color:#c9def7;background:linear-gradient(145deg,#e9f3ff,#d7eaff);color:#1472cf;box-shadow:0 2px 7px rgba(53,117,182,.08); }
+.tool-svg { width:29px;height:29px;stroke-width:1.65; }
+.tool-button span { font-size:13px;font-weight:550; }.tool-button kbd { display:none; }
+.tool-rail-divider { width:50px;margin:4px 0;background:rgba(115,133,151,.14); }
+.stage-area { min-height:0; }
+.stage-topline { position:absolute;z-index:4;top:8px;left:9px;right:9px;width:auto;height:auto;justify-content:space-between;pointer-events:none; }
+.stage-top-leading { display:flex;pointer-events:auto; }
+.breadcrumb { display:none; }
+.panel-peek { color:#536273; }
+.stage-top-actions { gap:3px;padding:3px;border:1px solid rgba(156,169,181,.18);border-radius:11px;background:rgba(250,252,254,.72);box-shadow:0 2px 9px rgba(35,51,66,.07); }
+.stage-top-actions .icon-button { color:#536273; }
+.zoom-label { color:#526172;font-size:10px; }
+.canvas-wrap { border-radius:17px;border-color:rgba(255,255,255,.96);background-color:#f7f8fa;background-image:linear-gradient(45deg,#e5e8ec 25%,transparent 25%),linear-gradient(-45deg,#e5e8ec 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e5e8ec 75%),linear-gradient(-45deg,transparent 75%,#e5e8ec 75%);background-size:24px 24px;background-position:0 0,0 12px,12px -12px,-12px 0;box-shadow:0 2px 8px rgba(37,53,69,.045); }
+.inspector { border-radius:19px;background:rgba(250,252,254,.89); }
+.inspector-tabs { height:52px;flex-basis:52px;padding:0 20px;gap:26px; }
+.tab-button { font-size:14px;font-weight:600; }.tab-button.active::after { height:3px;background:#318ff0; }
+.inspector-body { padding:17px; }
+.values-layout { grid-template-columns:1fr;gap:14px; }
+.values-controls { padding-right:0;border:0; }
+.property-section { padding:11px 0 13px; }
+.property-section h3 { font-size:10px; }.property-row { min-height:43px;grid-template-columns:minmax(70px,1fr) minmax(82px,.8fr) 26px;gap:9px; }
+.property-row label { font-size:12px; }.property-row input { height:30px;border-radius:8px;font-size:11px; }
+.key-toggle { font-size:15px; }.small-action { min-height:30px;border-radius:8px;font-size:10px; }
+.graph-editor { min-height:220px;border-radius:12px; }.curve-canvas { min-height:180px; }
+.bottom-dock { margin:0 10px 10px;border-color:rgba(255,255,255,.92);border-radius:20px;background:rgba(248,250,252,.9);box-shadow:0 3px 12px rgba(37,53,69,.055); }
+.timeline-toolbar { flex-basis:55px;height:55px;gap:17px;padding:0 18px;background:rgba(250,251,253,.74); }
+.timeline-title { min-width:105px; }.timeline-title strong { font-size:15px; }.fps-label { font-size:9px; }
+.transport { gap:3px;border:0;background:transparent; }.transport-button { width:39px;height:35px;border-radius:10px;font-size:13px; }.transport-button.play { background:#e3f0ff;color:#276eb6; }
+.timeline-options label { font-size:10px; }.timeline-options select { height:32px;border-radius:9px;font-size:11px; }.timeline-options .icon-button { width:34px;height:32px;font-size:17px; }
+.timeline-body { background:rgba(248,250,252,.72); }.timeline-label-column { background:rgba(242,245,248,.8); }.timeline-ruler,.timeline-label-spacer { height:32px;background:rgba(241,244,247,.9); }
+.ruler-tick { font-size:9px;padding:4px 5px; }.track-label { gap:9px;padding:0 12px;font-size:11px; }.track-code { width:32px;height:24px;border-radius:7px;font-size:9px; }
+.track-lane { background-color:rgba(250,251,252,.9); }.track-lane:nth-child(even) { background-color:rgba(244,246,248,.9); }
+.timeline-clip { top:5px;height:32px;border-radius:8px;font-size:11px; }.timeline-clip img { width:24px;height:24px;border-radius:5px; }
+.timeline-status { flex-basis:22px;height:22px;font-size:8px; }
+.timeline-collapsed #app-shell,
+#app-shell.timeline-collapsed { grid-template-rows:58px 54px minmax(250px,1fr) 54px; }
+@media (max-width:1100px) {
+  #app-shell { grid-template-rows:54px 50px minmax(230px,1fr) minmax(190px,32vh); }
+  .editor-layout { grid-template-columns:76px minmax(0,1fr) minmax(285px,30vw);gap:7px;padding-inline:7px; }
+  .tool-button { width:62px;min-height:67px; }.tool-svg { width:25px;height:25px; }
+  .quick-tools button { min-width:55px;padding-inline:8px;font-size:12px; }
+  .command-button { padding-inline:10px;font-size:12px; }
+}
+@media (max-width:760px) {
+  #app-shell { grid-template-rows:48px 46px minmax(220px,1fr) minmax(180px,31vh); }
+  .brand-copy span,.command-end-divider,.fit-command { display:none; }
+  .editor-layout { grid-template-columns:61px minmax(0,1fr) 260px; }.tool-button { width:51px;min-height:58px; }
+  .quick-tools button { min-width:0;padding-inline:7px;font-size:10px; }
+  .bottom-dock { margin-inline:6px; }.timeline-toolbar { gap:5px;padding-inline:8px; }
+}
+
 /* Jupiter 0.2 — skeletal skinning controls */
 .skin-toggle-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 0 7px; padding:8px; border:1px solid rgba(123,145,162,.2); border-radius:7px; background:rgba(255,255,255,.36); }
 .skin-toggle-row strong,.skin-toggle-row span { display:block; }

@@ -790,10 +790,12 @@ function toggleTools() {
 
 // Tool selection.
 $$('[data-tool]').forEach(button => button.addEventListener('click', () => setTool(button.dataset.tool)));
+$('#quick-import').addEventListener('click', () => $('#media-import-button').click());
 $('#undo-button').addEventListener('click', () => undo());
 $('#redo-button').addEventListener('click', () => redo());
 $('#zoom-in').addEventListener('click', () => { app.project.viewZoom = Math.min(5, app.project.viewZoom * 1.15); $('#zoom-label').textContent = `${Math.round(app.project.viewZoom * 100)}%`; refreshStage(); });
 $('#zoom-out').addEventListener('click', () => { app.project.viewZoom = Math.max(.15, app.project.viewZoom / 1.15); $('#zoom-label').textContent = `${Math.round(app.project.viewZoom * 100)}%`; refreshStage(); });
+$('#fit-canvas').addEventListener('click', () => { app.project.viewZoom = 1; $('#zoom-label').textContent = '100%'; refreshStage(); });
 $('#timeline-zoom-in').addEventListener('click', () => zoomTimeline(1));
 $('#timeline-zoom-out').addEventListener('click', () => zoomTimeline(-1));
 $('#play-button').addEventListener('click', playPlayback);
