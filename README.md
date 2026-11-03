@@ -46,7 +46,7 @@ Open the **Media** tab in the right Inspector and press **Add media**, or drop f
 
 - New, Open, Save and Save As use portable `.jupiter` project files with media embedded.
 - The custom title bar supports dragging and double-click maximize/restore. The traffic-light controls are green=minimize, yellow=maximize/restore and red=close.
-- The export icon is a visual placeholder; final video export is not implemented yet.
+- Export opens a save dialog and renders the timeline to MP4, including the timeline audio mix.
 
 ## Run on Windows
 
@@ -80,7 +80,7 @@ The Windows desktop build uses FFmpeg 9.0.2 and FFprobe from an LGPL shared buil
 
 - Rig deformation is a CPU-side 2D linear-blend mesh pass using a 24×24 normalized weight grid. This is an initial 2D skinning system; it is not a contour-aware editable mesh or inverse kinematics system.
 - Curves support Linear, Ease and Hold interpolation. Full Bezier tangent handles are not implemented.
-- FFprobe reads media duration/stream metadata, and the Rust backend includes a PNG-sequence-to-MP4 FFmpeg command. A finished export dialog/UI and audio waveforms are not implemented yet.
+- FFprobe reads media duration/stream metadata. MP4 export renders at the current canvas preview size; export resolution/codec controls and audio waveforms are not implemented yet.
 
 
 ## Skinning

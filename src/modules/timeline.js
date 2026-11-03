@@ -98,9 +98,9 @@ function makeRuler(width, ppf) {
 function trackLabel(track) {
   const row = document.createElement('div');
   row.className = `track-label ${track.type}`;
+  row.setAttribute('aria-label', `${track.code || track.name} ${track.type} track`);
   const code = document.createElement('span'); code.className = 'track-code'; code.textContent = track.code || track.name;
-  const name = document.createElement('span'); name.className = 'track-name'; name.textContent = track.name;
-  row.append(code, name);
+  row.append(code);
   return row;
 }
 
@@ -334,6 +334,7 @@ function onKeyPointerDown(event) {
   app.project.inspectorTab = 'values';
   app.project.graphProperty = keyDrag.keyKind === 'node' ? 'node-x' : keyDrag.property;
   app.renderInspector();
+  button.setPointerCapture?.(event.pointerId);
 }
 
 function deduplicateKeys(keys, movedKey) {

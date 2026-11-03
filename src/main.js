@@ -41,6 +41,60 @@ function fileToDataUrl(file) {
     const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file);
   });
 }
+function audioBufferToWavBase64(buffer) {
+  const channels = buffer.numberOfChannels, samples = buffer.length;
+  const bytes = new Uint8Array(44 + samples * channels * 2);
+  const view = new DataView(bytes.buffer);
+  const putText = (offset, value) => { for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i)); };
+  putText(0, 'RIFF'); view.setUint32(4, bytes.length - 8, true); putText(8, 'WAVE');
+  putText(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true); view.setUint32(24, buffer.sampleRate, true);
+  view.setUint32(28, buffer.sampleRate * channels * 2, true); view.setUint16(32, channels * 2, true); view.setUint16(34, 16, true);
+  putText(36, 'data'); view.setUint32(40, bytes.length - 44, true);
+  let offset = 44;
+  const channelData = Array.from({ length: channels }, (_, channel) => buffer.getChannelData(channel));
+  for (let i = 0; i < samples; i++) for (let channel = 0; channel < channels; channel++) {
+    const sample = Math.max(-1, Math.min(1, channelData[channel][i]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true); offset += 2;
+  }
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+async function renderProjectAudio(frameCount, fps) {
+  const audioClips = app.project.tracks.filter(track => track.type === 'audio').flatMap(track => track.clipIds)
+    .map(id => findClip(id)).filter(Boolean).map(clip => ({ clip, asset: findAsset(clip.assetId) }))
+    .filter(item => item.asset?.type === 'audio');
+  if (!audioClips.length) return null;
+  const AudioContextType = window.AudioContext || window.webkitAudioContext;
+  const OfflineAudioContextType = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!AudioContextType || !OfflineAudioContextType) throw new Error('This system cannot mix audio for export.');
+  const sampleRate = 44100, duration = frameCount / fps;
+  if (duration * sampleRate > 44100 * 600) throw new Error('Audio export is limited to ten minutes per render.');
+  const decoder = new AudioContextType({ sampleRate });
+  try {
+    const decoded = new Map();
+    for (const { asset } of audioClips) {
+      if (decoded.has(asset.id)) continue;
+      const encoded = asset.dataUrl.split(',', 2)[1] || '';
+      const binary = atob(encoded), bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+      try { decoded.set(asset.id, await decoder.decodeAudioData(bytes.buffer)); }
+      catch (error) { window.jupiterToast(`Skipped audio that cannot be mixed: ${asset.name}`); console.warn('Audio export skipped an unsupported asset.', error); }
+    }
+    const offline = new OfflineAudioContextType(2, Math.max(1, Math.ceil(duration * sampleRate)), sampleRate);
+    const compressor = offline.createDynamicsCompressor(); compressor.threshold.value = -4; compressor.ratio.value = 6; compressor.connect(offline.destination);
+    for (const { clip, asset } of audioClips) {
+      const start = clipStartFrame(clip.id) / fps;
+      const buffer = decoded.get(asset.id);
+      if (!buffer) continue;
+      const clipDuration = Math.min(buffer.duration, clip.durationFrames / fps, duration - start);
+      if (clipDuration <= 0) continue;
+      const source = offline.createBufferSource(); source.buffer = buffer; source.connect(compressor); source.start(start, 0, clipDuration);
+    }
+    return audioBufferToWavBase64(await offline.startRendering());
+  } finally { await decoder.close().catch(() => {}); }
+}
 function audioDuration(dataUrl) {
   return new Promise(resolve => {
     const audio = new Audio(); audio.preload = 'metadata';
@@ -290,8 +344,15 @@ function propertyField(label, value, key, options = {}) {
   const row = document.createElement('div'); row.className = 'property-row';
   const caption = document.createElement('label'); caption.textContent = label;
   const input = document.createElement('input'); input.type = options.type || 'number'; input.value = value ?? ''; input.step = options.step || '0.01';
+  if (options.min != null) input.min = String(options.min);
+  if (options.max != null) input.max = String(options.max);
   input.addEventListener('change', () => options.onChange(Number(input.value), key));
   row.append(caption, input);
+  if (options.onReset) {
+    const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'property-reset';
+    reset.textContent = '↺'; reset.title = `Reset ${label}`; reset.setAttribute('aria-label', `Reset ${label}`);
+    reset.addEventListener('click', options.onReset); row.appendChild(reset);
+  }
   if (options.keyAction) {
     const button = document.createElement('button'); button.type = 'button';
     button.className = `key-toggle${options.keyActive ? ' active' : ''}`;
@@ -387,16 +448,35 @@ function renderGraphEditor(parent, clip, node) {
     const values = current.points.map(point => Number(current.isNode ? point[current.axis] : point.value) || 0);
     let min = Math.min(...values), max = Math.max(...values);
     if (current.axis === 'opacity') { min = 0; max = 1; }
-    if (Math.abs(max - min) < 1e-5) { min -= .5; max += .5; }
-    const pad = Math.max((max - min) * .16, .08); min -= pad; max += pad;
-    const left = 26, right = width - 10, top = 10, bottom = height - 18;
+    else {
+      if (Math.abs(max - min) < 1e-5) { min -= .5; max += .5; }
+      const pad = Math.max((max - min) * .16, .08); min -= pad; max += pad;
+    }
+    const left = 48, right = width - 12, top = 15, bottom = height - 30;
     const maxFrame = Math.max(1, clip.durationFrames - 1);
     const px = frame => left + (Math.max(0, Math.min(maxFrame, frame)) / maxFrame) * (right - left);
     const py = value => bottom - ((value - min) / (max - min)) * (bottom - top);
-    c.strokeStyle = '#e4e9ee'; c.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) { const y = top + (bottom - top) * i / 4; c.beginPath(); c.moveTo(left, y); c.lineTo(right, y); c.stroke(); }
-    for (let i = 0; i <= 5; i++) { const x = left + (right - left) * i / 5; c.beginPath(); c.moveTo(x, top); c.lineTo(x, bottom); c.stroke(); }
-    c.fillStyle = '#9ba6b0'; c.font = '7px Inter'; c.fillText('0', 5, bottom + 3); c.fillText(String(maxFrame), right - 16, height - 4);
+    c.font = '10px Inter, system-ui, sans-serif';
+    for (let i = 0; i <= 4; i++) {
+      const y = top + (bottom - top) * i / 4;
+      const value = max - (max - min) * i / 4;
+      c.strokeStyle = i === 4 ? '#c8d3de' : '#e1e8ef'; c.lineWidth = 1;
+      c.beginPath(); c.moveTo(left, y); c.lineTo(right, y); c.stroke();
+      c.fillStyle = '#74879a';
+      const label = current.axis === 'opacity' || current.axis === 'scale' ? `${Math.round(value * 100)}%` : Number(value.toFixed(Math.abs(max - min) < 10 ? 1 : 0)).toString();
+      c.fillText(label, 3, y + 3);
+    }
+    for (let i = 0; i <= 4; i++) {
+      const frame = Math.round(maxFrame * i / 4), x = px(frame);
+      c.strokeStyle = '#e6ecf2'; c.beginPath(); c.moveTo(x, top); c.lineTo(x, bottom); c.stroke();
+      c.fillStyle = '#74879a'; c.textAlign = i === 0 ? 'left' : i === 4 ? 'right' : 'center';
+      c.fillText(`${(frame / app.project.fps).toFixed(1)}s`, x, height - 8);
+    }
+    c.textAlign = 'left';
+    const playX = px(localFrameFor(clip));
+    c.save(); c.strokeStyle = '#e18a55'; c.fillStyle = '#e18a55'; c.lineWidth = 1.2; c.setLineDash([4, 3]);
+    c.beginPath(); c.moveTo(playX, top); c.lineTo(playX, bottom); c.stroke(); c.setLineDash([]);
+    c.beginPath(); c.moveTo(playX - 4, top - 6); c.lineTo(playX + 4, top - 6); c.lineTo(playX, top); c.closePath(); c.fill(); c.restore();
     const points = current.points.map(point => ({ frame: point.frame, value: Number(current.isNode ? point[current.axis] : point.value) || 0, source: point }));
     if (points.length) {
       c.beginPath(); c.moveTo(px(points[0].frame), py(points[0].value));
@@ -414,8 +494,9 @@ function renderGraphEditor(parent, clip, node) {
       }
       c.strokeStyle = '#6487a5'; c.lineWidth = 1.5; c.stroke();
       for (const point of points) {
-        c.beginPath(); c.arc(px(point.frame), py(point.value), point.source.__base ? 2.3 : 3.5, 0, Math.PI * 2);
-        c.fillStyle = point.source.__base ? '#fff' : '#6487a5'; c.fill(); c.strokeStyle = '#4f7697'; c.lineWidth = 1; c.stroke();
+        const x = px(point.frame), y = py(point.value), size = point.source.__base ? 3 : 4.5;
+        c.beginPath(); c.moveTo(x, y - size); c.lineTo(x + size, y); c.lineTo(x, y + size); c.lineTo(x - size, y); c.closePath();
+        c.fillStyle = point.source.__base ? '#fff' : '#438fc9'; c.fill(); c.strokeStyle = '#3279b2'; c.lineWidth = 1.2; c.stroke();
       }
     }
     return { current, px, py, min, max, left, right, top, bottom, maxFrame };
@@ -489,11 +570,13 @@ function renderInspector() {
     const nodeKey = hasNodeKey(node, local);
     rigSection.append(propertyField('X position · %', (pos.x * 100).toFixed(1), 'x', {
       keyActive: nodeKey, keyAction: () => togglePropertyKey(clip, { node }),
-      onChange: value => { if (!Number.isFinite(value)) return; pushUndo('Set joint X'); const next = { ...pos, x: value / 100 }; if (app.project.autoKey !== false) setNodePose(clip, node.id, next, app.project.currentFrame, start); else node.x = next.x; app.renderAll(); },
+      onChange: value => { if (!Number.isFinite(value)) return; pushUndo('Set joint X'); const next = { ...pos, x: value / 100 }; if (app.project.autoKey !== false || nodeKey) setNodePose(clip, node.id, next, app.project.currentFrame, start); else node.x = next.x; app.renderAll(); },
+      onReset: () => { pushUndo('Reset joint X'); const next = { ...evaluateNode(node, local), x: node.x }; if (app.project.autoKey !== false || nodeKey) setNodePose(clip, node.id, next, app.project.currentFrame, start); else node.x = next.x; app.renderAll(); },
     }));
     rigSection.append(propertyField('Y position · %', (pos.y * 100).toFixed(1), 'y', {
       keyActive: nodeKey, keyAction: () => togglePropertyKey(clip, { node }),
-      onChange: value => { if (!Number.isFinite(value)) return; pushUndo('Set joint Y'); const next = { ...pos, y: value / 100 }; if (app.project.autoKey !== false) setNodePose(clip, node.id, next, app.project.currentFrame, start); else node.y = next.y; app.renderAll(); },
+      onChange: value => { if (!Number.isFinite(value)) return; pushUndo('Set joint Y'); const next = { ...pos, y: value / 100 }; if (app.project.autoKey !== false || nodeKey) setNodePose(clip, node.id, next, app.project.currentFrame, start); else node.y = next.y; app.renderAll(); },
+      onReset: () => { pushUndo('Reset joint Y'); const next = { ...evaluateNode(node, local), y: node.y }; if (app.project.autoKey !== false || nodeKey) setNodePose(clip, node.id, next, app.project.currentFrame, start); else node.y = next.y; app.renderAll(); },
     }));
     const actionRow = document.createElement('div'); actionRow.className = 'property-actions';
     const deleteButton = document.createElement('button'); deleteButton.className = 'small-action'; deleteButton.textContent = 'Delete joint';
@@ -506,31 +589,53 @@ function renderInspector() {
   if (clip && asset?.type === 'image') {
     const start = clipStartFrame(clip.id), localFrame = localFrameFor(clip);
     const transform = evaluateClipTransform(clip, localFrame);
-    const section = document.createElement('section'); section.className = 'property-section';
-    section.innerHTML = '<h3>ARTWORK TRANSFORM</h3>'; 
+    const section = document.createElement('section'); section.className = 'property-section transform-section';
+    section.innerHTML = '<div class="property-heading"><h3>TRANSFORM</h3><button type="button" class="reset-all">Reset all</button></div>';
+    section.querySelector('.reset-all').addEventListener('click', () => {
+      pushUndo('Reset transform');
+      const defaults = { x: 0, y: 0, rotation: 0, scale: 1, opacity: 1 };
+      if (app.project.autoKey !== false) {
+        for (const [property, value] of Object.entries(defaults)) {
+          setClipTransformValue(clip, property, value, app.project.currentFrame, start);
+        }
+      } else {
+        for (const [property, value] of Object.entries(defaults)) {
+          if (hasTransformKey(clip, property, localFrame)) setClipTransformValue(clip, property, value, app.project.currentFrame, start);
+          else clip.transform[property] = value;
+        }
+      }
+      app.renderAll();
+    });
     const transformFields = [
       ['Position X', 'x', transform.x, '0.1'], ['Position Y', 'y', transform.y, '0.1'],
-      ['Rotation', 'rotation', transform.rotation, '1'], ['Scale', 'scale', transform.scale, '0.01'], ['Opacity', 'opacity', transform.opacity, '0.01'],
+      ['Rotation (°)', 'rotation', transform.rotation, '1'], ['Scale (%)', 'scale', transform.scale, '1'], ['Opacity (%)', 'opacity', transform.opacity, '1'],
     ];
     for (const [label, key, value, step] of transformFields) {
-      section.append(propertyField(label, Number(value).toFixed(key === 'x' || key === 'y' ? 1 : 2), key, {
-        step,
+      const percent = key === 'opacity' || key === 'scale';
+      const shownValue = percent ? Number(value * 100).toFixed(0) : Number(value).toFixed(key === 'x' || key === 'y' ? 1 : 1);
+      section.append(propertyField(label, shownValue, key, {
+        min: percent ? 0 : undefined, max: percent ? 10000 : undefined, step: percent ? '1' : step,
         keyActive: hasTransformKey(clip, key, localFrame),
         keyAction: () => togglePropertyKey(clip, { property: key }),
         onChange: next => {
           if (!Number.isFinite(next)) return;
-          const clamped = key === 'scale' ? Math.max(.01, next) : key === 'opacity' ? Math.max(0, Math.min(1, next)) : next;
+          const normalized = percent ? next / 100 : next;
+          const clamped = key === 'scale' ? Math.max(.01, normalized) : key === 'opacity' ? Math.max(0, Math.min(1, normalized)) : next;
           pushUndo('Edit artwork transform');
-          if (app.project.autoKey !== false) setClipTransformValue(clip, key, clamped, app.project.currentFrame, start);
+          if (app.project.autoKey !== false || hasTransformKey(clip, key, localFrame)) setClipTransformValue(clip, key, clamped, app.project.currentFrame, start);
           else clip.transform[key] = clamped;
+          app.renderAll();
+        },
+        onReset: () => {
+          const defaults = { x: 0, y: 0, rotation: 0, scale: 1, opacity: 1 };
+          pushUndo(`Reset ${label}`);
+          if (app.project.autoKey !== false || hasTransformKey(clip, key, localFrame)) setClipTransformValue(clip, key, defaults[key], app.project.currentFrame, start);
+          else clip.transform[key] = defaults[key];
           app.renderAll();
         },
       }));
     }
-    const rig = clip.rig;
-    const rigInfo = document.createElement('section'); rigInfo.className = 'property-section';
-    rigInfo.innerHTML = `<h3>RIG</h3><div class="property-row"><label>Joints</label><span>${rig?.nodes?.length ?? 0}</span><span></span></div><div class="property-row"><label>Limbs</label><span>${rig?.bones?.length ?? 0}</span><span></span></div>`;
-    controlsColumn.append(section, rigInfo);
+    controlsColumn.append(section);
     const hierarchy = rigHierarchySection(clip); if (hierarchy) controlsColumn.appendChild(hierarchy);
     renderGraphEditor(graphColumn, clip, node || null);
   } else if (!node && asset) {
@@ -650,6 +755,71 @@ function pausePlayback() {
   cancelAnimationFrame(playbackRequest); playbackRequest = 0;
   stopAudio();
   $('#play-button').classList.remove('playing'); $('#play-button').textContent = '▶';
+}
+async function exportVideo() {
+  if (!tauriMode) { window.jupiterToast('Video export is available in the Jupiter desktop app.'); return; }
+  if (!app.project.clips.length) { window.jupiterToast('Add artwork to the timeline before exporting.'); return; }
+  let outputPath;
+  try {
+    outputPath = await save({
+      defaultPath: `${app.project.name || 'Jupiter'}.mp4`,
+      filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
+    });
+  } catch (error) { window.jupiterToast(`Could not open export dialog: ${error?.message || error}`); return; }
+  if (!outputPath) return;
+  if (!outputPath.toLowerCase().endsWith('.mp4')) outputPath += '.mp4';
+
+  pausePlayback();
+  const button = $('#export-placeholder');
+  const originalFrame = app.project.currentFrame;
+  const originalSelection = { clipId: app.project.selectedClipId, nodeId: app.project.selectedNodeId, tool: app.project.activeTool };
+  const frameCount = getSequenceDuration();
+  let framesDirectory = null;
+  button.disabled = true;
+  button.title = 'Rendering video…';
+  app.project.selectedClipId = null; app.project.selectedNodeId = null; app.project.activeTool = 'select';
+  window.jupiterToast(`Rendering ${frameCount} frames for export…`);
+  try {
+    framesDirectory = await invoke('create_export_frames_directory');
+    const audioBase64 = await renderProjectAudio(frameCount, app.project.fps);
+    const audioPath = audioBase64
+      ? await invoke('write_export_audio', { framesDirectory, dataBase64: audioBase64 })
+      : null;
+    const stageCanvas = $('#stage-canvas');
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = stageCanvas.width + (stageCanvas.width % 2);
+    exportCanvas.height = stageCanvas.height + (stageCanvas.height % 2);
+    const context = exportCanvas.getContext('2d');
+    for (let frame = 0; frame < frameCount; frame++) {
+      app.project.currentFrame = frame;
+      refreshStage();
+      renderStageNow();
+      context.fillStyle = '#ffffff'; context.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+      context.drawImage(stageCanvas, 0, 0);
+      const base64 = exportCanvas.toDataURL('image/png').split(',', 2)[1];
+      await invoke('write_export_frame', { framesDirectory, frameNumber: frame, dataBase64: base64 });
+      if (frame % Math.max(1, Math.floor(frameCount / 20)) === 0) {
+        button.title = `Rendering frame ${frame + 1} of ${frameCount}…`;
+      }
+    }
+    const message = await invoke('export_png_sequence_to_mp4', {
+      framesDirectory, outputPath, fps: app.project.fps, audioPath,
+    });
+    const exportName = outputPath.replaceAll('\\', '/').split('/').pop();
+    window.jupiterToast(`Export complete: ${exportName}`);
+    console.info(message);
+  } catch (error) {
+    window.jupiterToast(`Export failed: ${error?.message || error}`);
+  } finally {
+    app.project.currentFrame = originalFrame;
+    app.project.selectedClipId = originalSelection.clipId;
+    app.project.selectedNodeId = originalSelection.nodeId;
+    app.project.activeTool = originalSelection.tool;
+    app.renderAll();
+    if (framesDirectory) invoke('remove_export_frames_directory', { framesDirectory }).catch(() => {});
+    button.disabled = false;
+    button.title = 'Export video';
+  }
 }
 function playPlayback() {
   if (app.project.playing) { pausePlayback(); return; }
@@ -795,6 +965,7 @@ $('#redo-button').addEventListener('click', () => redo());
 $('#zoom-in').addEventListener('click', () => { app.project.viewZoom = Math.min(5, app.project.viewZoom * 1.15); $('#zoom-label').textContent = `${Math.round(app.project.viewZoom * 100)}%`; refreshStage(); });
 $('#zoom-out').addEventListener('click', () => { app.project.viewZoom = Math.max(.15, app.project.viewZoom / 1.15); $('#zoom-label').textContent = `${Math.round(app.project.viewZoom * 100)}%`; refreshStage(); });
 $('#fit-canvas').addEventListener('click', () => { app.project.viewZoom = 1; $('#zoom-label').textContent = '100%'; refreshStage(); });
+$('#export-placeholder').addEventListener('click', exportVideo);
 $('#timeline-zoom-in').addEventListener('click', () => zoomTimeline(1));
 $('#timeline-zoom-out').addEventListener('click', () => zoomTimeline(-1));
 $('#play-button').addEventListener('click', playPlayback);

@@ -4,6 +4,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{path::BaseDirectory, AppHandle, Manager};
 
 #[derive(Serialize)]
@@ -275,6 +276,51 @@ fn export_png_sequence_to_mp4(
     }
 }
 
+fn export_frames_directory(path: &str) -> Result<PathBuf, String> {
+    let directory = PathBuf::from(path);
+    let name = directory.file_name().and_then(|value| value.to_str()).unwrap_or_default();
+    if !directory.starts_with(std::env::temp_dir()) || !name.starts_with("jupiter-frames-") {
+        return Err("Invalid temporary export folder.".to_string());
+    }
+    Ok(directory)
+}
+
+#[tauri::command]
+fn create_export_frames_directory() -> Result<String, String> {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("Could not create export folder name: {error}"))?
+        .as_millis();
+    let directory = std::env::temp_dir().join(format!("jupiter-frames-{stamp}"));
+    fs::create_dir_all(&directory).map_err(|error| format!("Could not create export folder: {error}"))?;
+    Ok(directory.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn write_export_frame(frames_directory: String, frame_number: u32, data_base64: String) -> Result<(), String> {
+    if frame_number > 999_999 { return Err("Export contains too many frames.".to_string()); }
+    let directory = export_frames_directory(&frames_directory)?;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data_base64)
+        .map_err(|error| format!("Could not decode rendered frame: {error}"))?;
+    let frame_path = directory.join(format!("frame_{frame_number:06}.png"));
+    fs::write(frame_path, bytes).map_err(|error| format!("Could not save rendered frame: {error}"))
+}
+
+#[tauri::command]
+fn write_export_audio(frames_directory: String, data_base64: String) -> Result<String, String> {
+    let directory = export_frames_directory(&frames_directory)?;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data_base64)
+        .map_err(|error| format!("Could not decode export audio: {error}"))?;
+    let audio_path = directory.join("audio.wav");
+    fs::write(&audio_path, bytes).map_err(|error| format!("Could not save export audio: {error}"))?;
+    Ok(audio_path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn remove_export_frames_directory(frames_directory: String) -> Result<(), String> {
+    let directory = export_frames_directory(&frames_directory)?;
+    fs::remove_dir_all(directory).map_err(|error| format!("Could not remove temporary export frames: {error}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -286,6 +332,10 @@ pub fn run() {
             ffmpeg_status,
             probe_media,
             export_png_sequence_to_mp4,
+            create_export_frames_directory,
+            write_export_frame,
+            write_export_audio,
+            remove_export_frames_directory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Jupiter");
