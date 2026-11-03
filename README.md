@@ -83,28 +83,9 @@ The Windows desktop build bundles FFmpeg 9.0.2 and FFprobe from an LGPL shared b
 - FFprobe reads media duration/stream metadata, and the Rust backend includes a PNG-sequence-to-MP4 FFmpeg command. A finished export dialog/UI and audio waveforms are not implemented yet.
 
 
-## Jupiter 0.2.1 — Skeletal skinning polish
+## Skinning
 
-Jupiter 0.2.1 polishes the persistent mesh skin weights introduced in 0.2. Each image rig stores normalized bone influences on a 24×24 normalized vertex grid, so weights remain attached to the artwork when its source resolution changes. The renderer samples the weight grid bilinearly and blends per-bone 2D transforms. A revision-based render cache avoids re-serializing the full weight grid on every animation frame.
-
-### Weight painting
-
-1. Import an image and place it on the timeline.
-2. Create a rig with at least one bone.
-3. In Values, open **Skinning · 0.2.1**. Choose an influence bone and enable Weight painting.
-4. Paint directly on the artwork with the Node tool. Add, Subtract, and Smooth modes are available, along with aspect-correct brush radius and strength. Smoothing reads from a stable snapshot so the result is not biased by brush traversal order.
-5. Adjust brush radius and strength as needed. The live brush outline reflects the source image proportions, and the blue overlay previews the selected bone's influence on the artwork. Use **Regenerate auto weights** to rebuild distance-based influences, or **Normalize** to remove invalid bone IDs and normalize the stored vertices.
-
-Weights are stored inside the `.jupiter` project alongside the rig. Changing the rig topology invalidates old weights so the next render can generate a matching set. Existing projects without weights are upgraded automatically when their rig is rendered.
-
-
-### 0.2.1 polish notes
-
-- Live brush outline follows the image's width/height ratio.
-- Smooth painting blends all bone influences from an immutable stroke snapshot.
-- Weight validation removes stale bone IDs, repairs missing grid cells and preserves intentionally empty vertices.
-- Mesh cache keys use a weight revision counter rather than serializing the entire weight grid every frame.
-- Painting controls include visible value readouts and accessible toggle state.
+Each rig stores normalized bone influences on a 24×24 grid, generated **automatically** from the bone layout and kept with the artwork when its resolution changes. The renderer samples the grid bilinearly and blends per-bone 2D transforms. There is no weight painting or brush tooling; weights regenerate whenever the rig topology changes.
 
 Run verification with:
 

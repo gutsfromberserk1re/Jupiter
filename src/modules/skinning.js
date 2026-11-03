@@ -1,5 +1,5 @@
 /**
- * Persistent 2D skeletal skin weights.
+ * Persistent 2D skeletal skin weights, generated automatically from the rig.
  *
  * Weights live on a normalized grid, not in source-pixel coordinates, so they
  * survive changes to an imported image's resolution. Every stored vertex has
@@ -88,62 +88,6 @@ export function weightsAt(rig, u, v, resolution = SKIN_GRID) {
     for (const [id, value] of Object.entries(weights)) result[id] = (result[id] || 0) + value * factor;
   }
   return normalizeWeights(result, (rig?.bones || []).map(bone => bone.id));
-}
-
-/** Paint in normalized artwork coordinates. aspectY is imageHeight/imageWidth,
- * which keeps the brush circular in screen pixels for portrait and landscape art. */
-export function paintWeights(rig, point, boneId, options = {}) {
-  if (!rig || !boneId || !(rig.bones || []).some(bone => bone.id === boneId)) return 0;
-  ensureWeights(rig);
-  const radius = Math.max(0.005, Number(options.radius) || 0.09);
-  const strength = clamp(options.strength ?? 0.35);
-  const mode = ['add', 'subtract', 'smooth'].includes(options.mode) ? options.mode : 'add';
-  const aspectY = Math.max(0.05, Math.min(20, Number(options.aspectY) || 1));
-  const centerX = clamp(point?.x), centerY = clamp(point?.y);
-  const ids = (rig.bones || []).map(bone => bone.id);
-  const original = rig.weights;
-  // Smooth reads exclusively from this snapshot. It therefore does not depend
-  // on whether the brush loop traverses left-to-right or right-to-left.
-  const source = mode === 'smooth'
-    ? Object.fromEntries(Object.entries(original).map(([key, weights]) => [key, { ...weights }]))
-    : original;
-
-  let touched = 0;
-  for (let y = 0; y <= SKIN_GRID; y++) {
-    for (let x = 0; x <= SKIN_GRID; x++) {
-      const dx = x / SKIN_GRID - centerX;
-      const dy = (y / SKIN_GRID - centerY) * aspectY;
-      const distance = Math.hypot(dx, dy);
-      if (distance > radius) continue;
-
-      const falloff = 1 - distance / radius;
-      const influence = clamp(strength * falloff);
-      const key = gridKey(x, y);
-      const current = { ...(source[key] || {}) };
-      if (mode === 'subtract') {
-        current[boneId] = Math.max(0, (current[boneId] || 0) - influence);
-      } else if (mode === 'smooth') {
-        const neighbours = [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]
-          .filter(([nx, ny]) => nx >= 0 && ny >= 0 && nx <= SKIN_GRID && ny <= SKIN_GRID)
-          .map(([nx, ny]) => source[gridKey(nx, ny)] || {});
-        const averaged = {};
-        for (const id of ids) {
-          averaged[id] = neighbours.reduce((sum, weights) => sum + (weights[id] || 0), 0) / Math.max(1, neighbours.length);
-        }
-        for (const id of ids) current[id] = (current[id] || 0) * (1 - influence) + averaged[id] * influence;
-      } else {
-        current[boneId] = (current[boneId] || 0) + (1 - (current[boneId] || 0)) * influence;
-      }
-      rig.weights[key] = normalizeWeights(current, ids);
-      touched++;
-    }
-  }
-  if (touched) {
-    rig.weightsRevision = (Number(rig.weightsRevision) || 0) + 1;
-    rig.skinFormatVersion = SKIN_FORMAT_VERSION;
-    validatedRigVersions.set(rig, rig.weightsRevision);
-  }
-  return touched;
 }
 
 /** Validate legacy/project data without undoing intentionally empty vertices. */

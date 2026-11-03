@@ -6,7 +6,6 @@ import { loadImageAsset, refreshStage, setTool, renderStageNow } from './modules
 import { evaluateNode, setNodePose, evaluateClipTransform, setClipTransformValue, TRANSFORM_PROPERTIES, deleteNode } from './modules/rig.js';
 import { zoomTimeline, seekFrame, refreshTimeline, updateTimelinePlayhead, handleTimelineDrop, setAssetDragState } from './modules/timeline.js';
 import { detectMediaKind, mediaMime, nativeAssetBase64, setAssetTransfer, hasAssetTransferType, readAssetTransfer } from './modules/media-io.js';
-import { autoWeights, ensureWeights } from './modules/skinning.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -462,7 +461,6 @@ function renderInspector() {
   $('#inspector-values').classList.toggle('hidden', tab !== 'values');
   $('#inspector-media').classList.toggle('hidden', tab !== 'media');
   const values = $('#inspector-values');
-  const media = $('#inspector-media');
   const clip = findClip(app.project.selectedClipId);
   const asset = findAsset(app.project.selectedAssetId) || (clip ? findAsset(clip.assetId) : null);
   const node = clip?.rig?.nodes.find(item => item.id === app.project.selectedNodeId);
@@ -533,31 +531,6 @@ function renderInspector() {
     const rigInfo = document.createElement('section'); rigInfo.className = 'property-section';
     rigInfo.innerHTML = `<h3>RIG</h3><div class="property-row"><label>Joints</label><span>${rig?.nodes?.length ?? 0}</span><span></span></div><div class="property-row"><label>Limbs</label><span>${rig?.bones?.length ?? 0}</span><span></span></div>`;
     controlsColumn.append(section, rigInfo);
-    if (rig?.bones?.length) {
-      app.project.weightPaint ??= { enabled: false, boneId: rig.bones[0].id, radius: .09, strength: .35, mode: 'add' };
-      const paint = app.project.weightPaint;
-      if (!rig.bones.some(b => b.id === paint.boneId)) paint.boneId = rig.bones[0].id;
-      const skinSection = document.createElement('section'); skinSection.className = 'property-section weight-paint-section';
-      skinSection.innerHTML = '<h3 class="skin-section-title"><span>SKINNING</span><small>0.2.1</small></h3><div class="skin-toggle-row"><div><strong>Weight painting</strong><span>Paint bone influence on the artwork</span></div><button type="button" class="small-action" id="weight-paint-toggle" aria-pressed="false"></button></div><div class="property-row"><label for="weight-bone">Influence bone</label><select id="weight-bone"></select></div><div class="property-row"><label for="weight-mode">Brush mode</label><select id="weight-mode"><option value="add">Add influence</option><option value="subtract">Subtract</option><option value="smooth">Smooth</option></select></div><div class="property-row"><label for="weight-radius">Brush radius <output id="weight-radius-value">9%</output></label><input id="weight-radius" type="range" min="2" max="30" step="1"></div><div class="property-row"><label for="weight-strength">Strength <output id="weight-strength-value">35%</output></label><input id="weight-strength" type="range" min="5" max="100" step="5"></div><div class="property-actions"><button type="button" class="small-action" id="auto-weights">Regenerate auto weights</button><button type="button" class="small-action" id="normalize-weights">Normalize</button></div><p class="property-hint">Choose a bone, turn painting on, then drag over the image with the Node tool. The brush outline shows the affected area; blue shading previews the selected bone influence.</p>';
-      const toggle = skinSection.querySelector('#weight-paint-toggle');
-      const syncToggle = () => { toggle.textContent = paint.enabled ? 'Painting on' : 'Enable'; toggle.classList.toggle('active', paint.enabled); toggle.setAttribute('aria-pressed', String(!!paint.enabled)); };
-      syncToggle();
-      const boneSelect = skinSection.querySelector('#weight-bone');
-      for (const bone of rig.bones) { const a = rig.nodes.find(n => n.id === bone.from), b = rig.nodes.find(n => n.id === bone.to); const option = document.createElement('option'); option.value = bone.id; option.textContent = `${a?.name || 'Joint'} → ${b?.name || 'Joint'}`; boneSelect.appendChild(option); }
-      boneSelect.value = paint.boneId; skinSection.querySelector('#weight-mode').value = paint.mode || 'add';
-      const radiusInput = skinSection.querySelector('#weight-radius'), strengthInput = skinSection.querySelector('#weight-strength');
-      const radiusValue = skinSection.querySelector('#weight-radius-value'), strengthValue = skinSection.querySelector('#weight-strength-value');
-      radiusInput.value = Math.round((paint.radius ?? .09) * 100); strengthInput.value = Math.round((paint.strength ?? .35) * 100);
-      radiusValue.textContent = `${radiusInput.value}%`; strengthValue.textContent = `${strengthInput.value}%`;
-      toggle.addEventListener('click', () => { paint.enabled = !paint.enabled; app.project.activeTool = 'node'; syncToggle(); app.renderToolbar(); app.drawStage(); });
-      boneSelect.addEventListener('change', () => { paint.boneId = boneSelect.value; app.drawStage(); });
-      skinSection.querySelector('#weight-mode').addEventListener('change', e => { paint.mode = e.target.value; });
-      radiusInput.addEventListener('input', e => { paint.radius = Number(e.target.value) / 100; radiusValue.textContent = `${e.target.value}%`; app.drawStage(); });
-      strengthInput.addEventListener('input', e => { paint.strength = Number(e.target.value) / 100; strengthValue.textContent = `${e.target.value}%`; });
-      skinSection.querySelector('#auto-weights').addEventListener('click', () => { pushUndo('Regenerate automatic weights'); rig.weights = autoWeights(rig); rig.weightsRevision = (Number(rig.weightsRevision) || 0) + 1; app.renderAll(); });
-      skinSection.querySelector('#normalize-weights').addEventListener('click', () => { pushUndo('Normalize skin weights'); ensureWeights(rig); rig.weightsRevision = (Number(rig.weightsRevision) || 0) + 1; app.renderAll(); });
-      controlsColumn.appendChild(skinSection);
-    }
     const hierarchy = rigHierarchySection(clip); if (hierarchy) controlsColumn.appendChild(hierarchy);
     renderGraphEditor(graphColumn, clip, node || null);
   } else if (!node && asset) {
@@ -571,15 +544,18 @@ function renderInspector() {
     controlsColumn.innerHTML += '<div class="inspector-empty">Select an artwork layer or joint.</div>'; graphColumn.innerHTML = '<div class="graph-empty">Animation curves appear here.</div>';
   }
 
-  media.innerHTML = '';
-  if (!asset) { media.innerHTML = '<div class="inspector-empty">No media selected.</div>'; }
-  else {
+  // IMPORTANT: only touch the dedicated detail slot. The rest of #inspector-media
+  // (Add button, #media-list) is static markup that renderMedia() owns; wiping the
+  // whole panel used to destroy the list after the first import.
+  const detail = $('#media-detail');
+  detail.innerHTML = '';
+  if (asset) {
     const section = document.createElement('section'); section.className = 'property-section';
-    section.innerHTML = `<h3>MEDIA SOURCE</h3><div class="media-detail">${asset.type === 'image' ? `<img src="${asset.dataUrl}" alt="">` : '<div class="media-thumb">♫</div>'}<div><strong></strong><span></span></div></div>`;
+    section.innerHTML = `<h3>MEDIA SOURCE</h3><div class="media-detail">${asset.type === 'image' ? '<img alt="">' : '<div class="media-thumb">♫</div>'}<div><strong></strong><span></span></div></div>`;
+    const preview = section.querySelector('img'); if (preview) preview.src = asset.dataUrl;
     section.querySelector('strong').textContent = asset.name;
     section.querySelector('span').textContent = `${asset.mime} · ${asset.type === 'image' ? `${asset.width} × ${asset.height}` : `${asset.duration?.toFixed(1) ?? '—'} sec`}`;
-    media.appendChild(section);
-
+    detail.appendChild(section);
   }
 }
 

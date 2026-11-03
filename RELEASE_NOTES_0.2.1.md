@@ -4,7 +4,7 @@ This release refines the 0.2 skinning workflow without changing Jupiter's overal
 
 ## What's improved
 
-- Live brush outline, scaled to match the artwork's width and height.
+
 - A subtle blue influence preview, clipped to PNG transparency and deformed with the current pose.
 - More predictable Smooth painting: every stroke reads from a stable weight snapshot and blends all influences.
 - Automatic image-aspect correction for the paint brush.
