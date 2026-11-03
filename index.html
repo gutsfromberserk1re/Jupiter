@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#7e8994" />
+  <meta name="theme-color" content="#000000" />
   <title>Untitled Project · Jupiter</title>
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
@@ -12,7 +12,6 @@
     <header class="titlebar glass-panel" id="titlebar">
       <div class="brand-zone">
         <button class="brand-orb" id="project-menu-button" title="Project menu" aria-label="Open project menu"><span>J</span></button>
-        <div class="brand-copy" data-tauri-drag-region><strong>JUPITER</strong><span>2D ANIMATION STUDIO</span></div>
         <span class="title-divider"></span>
         <span class="project-name" id="project-name" data-tauri-drag-region>Untitled Project</span>
       </div>
@@ -25,15 +24,10 @@
 
     <div class="commandbar glass-panel">
       <div class="command-group command-leading">
-        <button class="command-button import-command" id="quick-import" title="Import media" aria-label="Import media"><span class="import-plus">＋</span> Import PNG</button>
-        <span class="command-divider"></span>
         <button class="command-button square" id="undo-button" title="Undo · Ctrl+Z" aria-label="Undo" disabled>↶</button>
         <button class="command-button square" id="redo-button" title="Redo · Ctrl+Y" aria-label="Redo" disabled>↷</button>
       </div>
       <div class="command-spacer"></div>
-      <div class="quick-tools" role="toolbar" aria-label="Quick editing tools">
-        <button data-tool="select">Select</button><button data-tool="move">Move</button><button data-tool="rig">Rig</button><button data-tool="node">Node</button>
-      </div>
       <button class="command-button fit-command" id="fit-canvas" title="Fit canvas">Fit Canvas ⛶</button>
       <span class="command-divider command-end-divider"></span>
       <button class="export-placeholder" id="export-placeholder" title="Export (coming later)" aria-label="Export">

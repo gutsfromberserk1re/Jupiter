@@ -38,7 +38,7 @@ Open the **Media** tab in the right Inspector and press **Add media**, or drop f
 ## Timeline
 
 - V1 and A1 are visible in a new project.
-- V2/V3 and A2/A3 appear as drop targets only while dragging matching media.
+- V2/V3 and A2/A3 appear as drop targets while dragging matching media or moving a clip into a new lane.
 - Clips on a track are magnetic and contiguous; dragging reorders clips without leaving gaps.
 - Video tracks composite from V1 through V3. Audio clips play during preview.
 

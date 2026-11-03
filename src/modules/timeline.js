@@ -108,7 +108,7 @@ function createGhostLane(type) {
   const count = getTracks(type).length;
   if (count >= 3) return null;
   const lane = document.createElement('div');
-  lane.className = `new-layer-drop ${type} available`;
+  lane.className = `new-layer-drop ${type}`;
   lane.dataset.createTrack = type;
   lane.dataset.createTrackCode = `${type === 'video' ? 'V' : 'A'}${count + 1}`;
   lane.textContent = type === 'video' ? `Drop image here to create V${count + 1}` : `Drop audio here to create A${count + 1}`;
@@ -280,6 +280,7 @@ function finishClipDrag(event) {
     if (!state.element) return;
     state.element.style.transform = ''; state.element.style.zIndex = '';
     state.element.style.opacity = ''; state.element.style.pointerEvents = '';
+    setAssetDragState(null, false);
   };
   if (!clip || !state.moved) { resetVisual(); return; }
   const lane = laneAtPoint(event.clientX, event.clientY);
@@ -299,6 +300,7 @@ function finishClipDrag(event) {
   app.project.selectedClipId = clip.id;
   app.project.selectedAssetId = clip.assetId;
   app.project.inspectorTab = 'values';
+  setAssetDragState(null, false);
   app.renderAll();
 }
 
@@ -365,6 +367,7 @@ lanes.addEventListener('pointerdown', event => {
 window.addEventListener('pointerup', event => { finishClipDrag(event); finishKeyDrag(event); });
 window.addEventListener('pointermove', event => {
   if (clipDrag && Math.hypot(event.clientX - clipDrag.startX, event.clientY - clipDrag.startY) > 5) {
+    if (!clipDrag.moved) setAssetDragState(findTrack(clipDrag.fromTrackId)?.type || null, true);
     clipDrag.moved = true;
     const dx = event.clientX - clipDrag.startX, dy = event.clientY - clipDrag.startY;
     clipDrag.element.style.transform = `translate(${dx}px, ${dy}px)`;
