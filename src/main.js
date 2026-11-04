@@ -88,9 +88,16 @@ async function renderProjectAudio(frameCount, fps) {
       const start = clipStartFrame(clip.id) / fps;
       const buffer = decoded.get(asset.id);
       if (!buffer) continue;
-      const clipDuration = Math.min(buffer.duration, clip.durationFrames / fps, duration - start);
+      const clipDuration = Math.min(clip.durationFrames / fps, duration - start);
       if (clipDuration <= 0) continue;
-      const source = offline.createBufferSource(); source.buffer = buffer; source.connect(compressor); source.start(start, 0, clipDuration);
+      const source = offline.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      source.loopStart = 0;
+      source.loopEnd = buffer.duration;
+      source.connect(compressor);
+      const sourceOffset = ((((Number(clip.sourceOffsetFrames) || 0) / fps) % buffer.duration) + buffer.duration) % buffer.duration;
+      source.start(start, sourceOffset, clipDuration);
     }
     return audioBufferToWavBase64(await offline.startRendering());
   } finally { await decoder.close().catch(() => {}); }
@@ -101,6 +108,54 @@ function audioDuration(dataUrl) {
     audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 5);
     audio.onerror = () => resolve(5); audio.src = dataUrl;
   });
+}
+const waveformLoads = new Map();
+async function computeAudioWaveform(dataUrl) {
+  const AudioContextType = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextType) return null;
+  const encoded = String(dataUrl || '').split(',', 2)[1] || '';
+  if (!encoded || encoded.length > 64 * 1024 * 1024) return null;
+  let context;
+  try {
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    context = new AudioContextType();
+    const buffer = await context.decodeAudioData(bytes.buffer);
+    const bins = Math.min(900, Math.max(120, Math.ceil(buffer.duration * 36)));
+    const peaks = new Array(bins).fill(0);
+    for (let bin = 0; bin < bins; bin++) {
+      const start = Math.floor(bin * buffer.length / bins);
+      const end = Math.max(start + 1, Math.floor((bin + 1) * buffer.length / bins));
+      let peak = 0;
+      for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+        const samples = buffer.getChannelData(channel);
+        for (let i = start; i < end; i++) peak = Math.max(peak, Math.abs(samples[i] || 0));
+      }
+      peaks[bin] = Math.round(peak * 1000) / 1000;
+    }
+    return peaks;
+  } catch (error) {
+    console.debug('Audio waveform decode is unavailable for this media.', error);
+    return null;
+  } finally {
+    if (context) await context.close().catch(() => {});
+  }
+}
+async function ensureAudioWaveform(asset) {
+  if (asset?.type !== 'audio' || Array.isArray(asset.waveform) || asset.waveformUnavailable) return asset?.waveform || null;
+  if (waveformLoads.has(asset.id)) return waveformLoads.get(asset.id);
+  const task = computeAudioWaveform(asset.dataUrl).then(peaks => {
+    if (peaks?.length) {
+      asset.waveform = peaks;
+      app.renderTimeline();
+      return peaks;
+    }
+    asset.waveformUnavailable = true;
+    return null;
+  }).finally(() => waveformLoads.delete(asset.id));
+  waveformLoads.set(asset.id, task);
+  return task;
 }
 async function resolveAudioDuration(dataUrl, sourcePath = null) {
   if (tauriMode && sourcePath) {
@@ -308,7 +363,10 @@ function renderMedia() {
 }
 
 function localFrameFor(clip) {
-  return Math.max(0, Math.min(clip.durationFrames - 1, app.project.currentFrame - clipStartFrame(clip.id)));
+  const timelineFrame = Math.max(0, Math.min(clip.durationFrames - 1, app.project.currentFrame - clipStartFrame(clip.id)));
+  const sourceFrame = timelineFrame + (Number(clip.sourceOffsetFrames) || 0);
+  const loopDuration = Math.max(0, Number(clip.loopDurationFrames) || 0);
+  return loopDuration ? ((sourceFrame % loopDuration) + loopDuration) % loopDuration : sourceFrame;
 }
 function hasNodeKey(node, frame) { return !!node?.keys?.some(key => key.frame === frame); }
 function hasTransformKey(clip, property, frame) { return !!clip?.transform?.keys?.[property]?.some(key => key.frame === frame); }
@@ -741,7 +799,7 @@ function stopAudio() {
 function syncAudio(frame) {
   const wanted = new Map();
   for (const track of app.project.tracks.filter(t => t.type === 'audio')) {
-    let cursor = 0;
+    let cursor = Math.max(0, Number(track.startFrame) || 0);
     for (const clipId of track.clipIds) {
       const clip = findClip(clipId); const asset = clip && findAsset(clip.assetId);
       if (!clip || !asset) continue;
@@ -753,7 +811,11 @@ function syncAudio(frame) {
   for (const [id, item] of wanted) {
     if (currentAudio.has(id)) continue;
     const audio = new Audio(item.asset.dataUrl);
-    audio.currentTime = Math.max(0, item.local / app.project.fps);
+    audio.loop = true;
+    const fps = app.project.fps;
+    const sourceFrames = Math.max(1, Math.round((Number(item.asset.duration) || item.clip.loopDurationFrames / fps || item.clip.durationFrames / fps) * fps));
+    const sourceFrame = ((((Number(item.clip.sourceOffsetFrames) || 0) + item.local) % sourceFrames) + sourceFrames) % sourceFrames;
+    audio.currentTime = sourceFrame / fps;
     audio.volume = 1; audio.play().catch(() => {}); currentAudio.set(id, audio);
   }
 }
@@ -874,7 +936,7 @@ function validateProject(data) {
   if (!data || typeof data !== 'object' || !Array.isArray(data.assets) || !Array.isArray(data.tracks) || !Array.isArray(data.clips)) throw new Error('This file is not a valid Jupiter project.');
   data.fps = Number(data.fps) || 24;
   data.autoKey = true;
-  data.tracks.forEach(track => { track.clipIds ??= []; });
+  data.tracks.forEach(track => { track.clipIds ??= []; track.startFrame = Math.max(0, Number(track.startFrame) || 0); });
   const counts = { video: 0, audio: 0 };
   const normalizedTracks = [];
   for (const track of data.tracks) {
@@ -896,6 +958,12 @@ function validateProject(data) {
   }
   data.clips.forEach(clip => {
     clip.durationFrames = Math.max(1, Number(clip.durationFrames) || data.fps * 5);
+    const clipAsset = data.assets.find(asset => asset.id === clip.assetId);
+    const defaultLoop = clipAsset?.type === 'audio' && clipAsset.duration
+      ? Math.max(1, Math.round(clipAsset.duration * data.fps))
+      : clip.durationFrames;
+    clip.loopDurationFrames = Math.max(1, Number(clip.loopDurationFrames) || defaultLoop);
+    clip.sourceOffsetFrames = Number.isFinite(Number(clip.sourceOffsetFrames)) ? Number(clip.sourceOffsetFrames) : 0;
     clip.transform ??= { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
     clip.transform.keys ??= {};
     for (const property of TRANSFORM_PROPERTIES) clip.transform.keys[property] ??= [];
@@ -953,6 +1021,8 @@ app.renderInspector = renderInspector;
 app.renderToolbar = renderToolbar;
 app.renderTimeline = refreshTimeline;
 app.drawStage = refreshStage;
+app.loadAudioWaveform = ensureAudioWaveform;
+app.pausePlayback = pausePlayback;
 app.renderAll = renderAll;
 
 function toggleInspector() {

@@ -6,6 +6,7 @@ const createTrack = (type, index) => ({
   name: type === 'video' ? (index === 1 ? 'Main video' : `Video ${index}`) : (index === 1 ? 'Main audio' : `Audio ${index}`),
   code: `${type === 'video' ? 'V' : 'A'}${index}`,
   type,
+  startFrame: 0,
   clipIds: [],
 });
 
@@ -49,6 +50,8 @@ export const app = {
   renderMedia: () => {},
   renderToolbar: () => {},
   renderAll: () => {},
+  loadAudioWaveform: null,
+  pausePlayback: null,
   pointer: null,
   lastPlaybackTime: 0,
   audioPlayers: new Map(),
@@ -92,7 +95,7 @@ export function clipStartFrame(clipId) {
   if (!clip) return 0;
   const track = findTrack(clip.trackId);
   if (!track) return 0;
-  let cursor = 0;
+  let cursor = Math.max(0, Number(track.startFrame) || 0);
   for (const id of track.clipIds) {
     const item = findClip(id);
     if (!item) continue;
@@ -107,7 +110,7 @@ export function getTrackDuration(track) {
 }
 
 export function getSequenceDuration() {
-  return Math.max(1, ...app.project.tracks.map(getTrackDuration));
+  return Math.max(1, ...app.project.tracks.map(track => Math.max(0, Number(track.startFrame) || 0) + getTrackDuration(track)));
 }
 
 // Returns every video layer active at a frame, from V1 (back) to V3 (front).
@@ -117,13 +120,16 @@ export function getActiveClips(frame = app.project.currentFrame) {
   const active = [];
   const videoTracks = getTracks('video').sort((a, b) => Number(a.code?.slice(1) || 1) - Number(b.code?.slice(1) || 1));
   for (const track of videoTracks) {
-    let cursor = 0;
+    let cursor = Math.max(0, Number(track.startFrame) || 0);
     for (const clipId of track.clipIds) {
       const clip = findClip(clipId);
       if (!clip) continue;
       const duration = Math.max(1, clip.durationFrames || 1);
       if (frame >= cursor && frame < cursor + duration) {
-        active.push({ clip, asset: findAsset(clip.assetId), startFrame: cursor, localFrame: frame - cursor, track });
+        let localFrame = frame - cursor + (Number(clip.sourceOffsetFrames) || 0);
+        const loopDuration = Math.max(0, Number(clip.loopDurationFrames) || 0);
+        if (loopDuration) localFrame = ((localFrame % loopDuration) + loopDuration) % loopDuration;
+        active.push({ clip, asset: findAsset(clip.assetId), startFrame: cursor, localFrame, track });
         break;
       }
       cursor += duration;
@@ -155,6 +161,8 @@ export function addClip(assetId, trackId = null) {
   const clip = {
     id: makeId('clip'), assetId, trackId: track.id,
     durationFrames: type === 'audio' && asset.duration ? Math.max(1, Math.round(asset.duration * app.project.fps)) : Math.round(app.project.fps * 5),
+    loopDurationFrames: type === 'audio' && asset.duration ? Math.max(1, Math.round(asset.duration * app.project.fps)) : Math.round(app.project.fps * 5),
+    sourceOffsetFrames: 0,
     transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, keys: { x: [], y: [], scale: [], rotation: [], opacity: [] } },
     rig: type === 'video' && asset.type === 'image' ? { nodes: [], bones: [] } : null,
   };
@@ -164,7 +172,7 @@ export function addClip(assetId, trackId = null) {
   app.project.selectedAssetId = assetId;
   app.project.inspectorTab = 'values';
   app.project.selectedNodeId = null;
-  app.project.currentFrame = Math.max(0, getTrackDuration(track) - clip.durationFrames);
+  app.project.currentFrame = Math.max(0, (Number(track.startFrame) || 0) + getTrackDuration(track) - clip.durationFrames);
   app.renderAll();
   return clip;
 }
@@ -174,7 +182,10 @@ export function removeClip(clipId) {
   if (!clip) return;
   pushUndo('Remove clip');
   const track = findTrack(clip.trackId);
-  if (track) track.clipIds = track.clipIds.filter(id => id !== clipId);
+  if (track) {
+    track.clipIds = track.clipIds.filter(id => id !== clipId);
+    if (!track.clipIds.length) track.startFrame = 0;
+  }
   app.project.clips = app.project.clips.filter(item => item.id !== clipId);
   if (app.project.selectedClipId === clipId) app.project.selectedClipId = null;
   app.project.selectedNodeId = null;

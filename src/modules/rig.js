@@ -45,7 +45,9 @@ export function evaluatedRig(clip, frame) {
 export function setNodePose(clip, nodeId, position, globalFrame, startFrame = 0) {
   const node = clip?.rig?.nodes.find(item => item.id === nodeId);
   if (!node) return;
-  const frame = Math.max(0, Math.round(globalFrame - startFrame));
+  let frame = Math.round(globalFrame - startFrame + (Number(clip.sourceOffsetFrames) || 0));
+  const loop = Math.max(0, Number(clip.loopDurationFrames) || 0);
+  frame = loop ? ((frame % loop) + loop) % loop : Math.max(0, frame);
   node.keys ??= [];
   const existing = node.keys.find(key => key.frame === frame);
   if (existing) { existing.x = position.x; existing.y = position.y; }
@@ -138,7 +140,9 @@ export function setClipTransformValue(clip, property, value, globalFrame, startF
   clip.transform ??= { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
   clip.transform.keys ??= {};
   clip.transform.keys[property] ??= [];
-  const frame = Math.max(0, Math.round(globalFrame - startFrame));
+  let frame = Math.round(globalFrame - startFrame + (Number(clip.sourceOffsetFrames) || 0));
+  const loop = Math.max(0, Number(clip.loopDurationFrames) || 0);
+  frame = loop ? ((frame % loop) + loop) % loop : Math.max(0, frame);
   const existing = clip.transform.keys[property].find(key => key.frame === frame);
   if (existing) existing.value = value;
   else clip.transform.keys[property].push({ frame, value, interpolation: 'linear' });
