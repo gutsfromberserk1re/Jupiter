@@ -374,6 +374,7 @@ function onPointerDown(event) {
   // to be inside the PNG bounds, since rig endpoints may sit just outside it.
   if (tool === 'node') {
     if (!hit) return;
+    app.pausePlayback?.();
     pushUndo('Pose joint');
     app.project.selectedClipId = active.clip.id;
     app.project.selectedAssetId = active.asset.id;
@@ -386,6 +387,7 @@ function onPointerDown(event) {
   // Move transforms the selected artwork layer only; it never edits rig nodes.
   if (tool === 'move') {
     if (!onImage) return;
+    app.pausePlayback?.();
     app.project.selectedClipId = active.clip.id;
     app.project.selectedAssetId = active.asset.id;
     app.project.selectedNodeId = null;

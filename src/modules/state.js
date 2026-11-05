@@ -126,10 +126,9 @@ export function getActiveClips(frame = app.project.currentFrame) {
       if (!clip) continue;
       const duration = Math.max(1, clip.durationFrames || 1);
       if (frame >= cursor && frame < cursor + duration) {
-        let localFrame = frame - cursor + (Number(clip.sourceOffsetFrames) || 0);
-        const loopDuration = Math.max(0, Number(clip.loopDurationFrames) || 0);
-        if (loopDuration) localFrame = ((localFrame % loopDuration) + loopDuration) % loopDuration;
-        active.push({ clip, asset: findAsset(clip.assetId), startFrame: cursor, localFrame, track });
+        const asset = findAsset(clip.assetId);
+        const localFrame = frame - cursor;
+        active.push({ clip, asset, startFrame: cursor, localFrame, track });
         break;
       }
       cursor += duration;
@@ -161,7 +160,7 @@ export function addClip(assetId, trackId = null) {
   const clip = {
     id: makeId('clip'), assetId, trackId: track.id,
     durationFrames: type === 'audio' && asset.duration ? Math.max(1, Math.round(asset.duration * app.project.fps)) : Math.round(app.project.fps * 5),
-    loopDurationFrames: type === 'audio' && asset.duration ? Math.max(1, Math.round(asset.duration * app.project.fps)) : Math.round(app.project.fps * 5),
+    loopDurationFrames: type === 'audio' && asset.duration ? Math.max(1, Math.round(asset.duration * app.project.fps)) : 0,
     sourceOffsetFrames: 0,
     transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, keys: { x: [], y: [], scale: [], rotation: [], opacity: [] } },
     rig: type === 'video' && asset.type === 'image' ? { nodes: [], bones: [] } : null,

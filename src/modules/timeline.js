@@ -147,7 +147,7 @@ function createGhostLane(type) {
 }
 
 function visibleKeyFrames(clip, frame) {
-  const offset = Number(clip.sourceOffsetFrames) || 0;
+  const offset = 0;
   const loop = Math.max(0, Number(clip.loopDurationFrames) || 0);
   if (!loop) {
     const localFrame = frame - offset;
@@ -189,12 +189,11 @@ function keyMarkersForClip(clip, clipElement, ppf) {
     if (marker.nodeId) diamond.dataset.nodeId = marker.nodeId;
     if (marker.property) diamond.dataset.property = marker.property;
     diamond.style.left = `${Math.max(4, marker.frame * ppf)}px`;
-    diamond.style.top = `${7 + marker.row * 6}px`;
+    diamond.style.top = `${6 + marker.row * 6}px`;
     diamond.setAttribute('aria-label', marker.kind === 'node'
       ? `${clip.rig.nodes.find(node => node.id === marker.nodeId)?.name || 'Joint'} keyframe · frame ${marker.frame}`
       : `${propertyLabels[marker.property]} keyframe · frame ${marker.frame}`);
     diamond.title = diamond.getAttribute('aria-label');
-    diamond.addEventListener('click', event => selectKeyframe(event, diamond));
     clipElement.appendChild(diamond);
   }
 }
@@ -214,7 +213,7 @@ function selectKeyframe(event, button) {
 }
 
 function nearestKeyMarker(clipElement, clientX, clientY) {
-  let nearest = null, distance = 15;
+  let nearest = null, distance = 18;
   for (const button of clipElement.querySelectorAll('.clip-key')) {
     const rect = button.getBoundingClientRect();
     const candidate = Math.hypot(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2));
@@ -309,6 +308,8 @@ function renderTrack(track, ppf) {
     element.addEventListener('click', event => {
       event.stopPropagation();
       if (Date.now() < suppressClipClickUntil) return;
+      const marker = nearestKeyMarker(element, event.clientX, event.clientY);
+      if (marker) { selectKeyframe(event, marker); return; }
       app.project.selectedClipId = clip.id;
       app.project.selectedAssetId = asset.id;
       app.project.selectedNodeId = null;
@@ -418,6 +419,7 @@ function onClipTrimPointerDown(event, clip, edge) {
     trackStartFrame: Math.max(0, Number(track.startFrame) || 0),
     changed: false,
   };
+  timelineBody.setPointerCapture?.(event.pointerId);
   app.project.selectedClipId = clip.id;
   app.project.selectedAssetId = clip.assetId;
   app.project.selectedNodeId = null;
@@ -431,6 +433,7 @@ function applyClipTrim(event) {
   if (!state || event.pointerId !== state.pointerId) return;
   const clip = findClip(state.clipId);
   if (!clip) return;
+  const asset = findAsset(clip.assetId);
   const rawDelta = Math.round((event.clientX - state.startX) / Math.max(.1, state.pixelsPerFrame));
   const maxDuration = app.project.fps * 600;
   let durationFrames = state.durationFrames;
@@ -449,7 +452,7 @@ function applyClipTrim(event) {
     const delta = Math.max(minimumDelta, Math.min(maximumDelta, rawDelta));
     durationFrames = state.durationFrames - delta;
     if (previous) previousDurationFrames = state.previousDurationFrames + delta;
-    sourceOffsetFrames = state.sourceOffsetFrames + delta;
+    sourceOffsetFrames = asset?.type === 'audio' ? state.sourceOffsetFrames + delta : 0;
   }
   if (durationFrames === clip.durationFrames
     && (state.edge !== 'left' || previousDurationFrames === state.previousDurationFrames)) return;
@@ -596,6 +599,7 @@ function keyArrayForButton(button, clip) {
 
 function onKeyPointerDown(event, button) {
   event.stopPropagation(); event.preventDefault();
+  app.pausePlayback?.();
   const clip = findClip(button.dataset.clipId);
   const frame = Number(button.dataset.keyFrame);
   const keyArray = keyArrayForButton(button, clip);
@@ -614,6 +618,7 @@ function onKeyPointerDown(event, button) {
     startY: event.clientY,
     startKeyFrame: key.frame,
     startTimelineFrame: Number(button.dataset.timelineFrame || 0),
+    grabOffsetFrames: frameFromEvent(event) - clipStartFrame(clip.id) - Number(button.dataset.timelineFrame || 0),
     moved: false,
   };
   app.project.selectedClipId = clip.id;
@@ -642,7 +647,7 @@ function finishKeyDrag(event) {
   const clip = findClip(state.clipId); if (!clip) return;
   if (!state.moved) {
     state.key.frame = state.startKeyFrame;
-    app.project.currentFrame = clipStartFrame(clip.id) + state.startTimelineFrame;
+    seek(clipStartFrame(clip.id) + state.startTimelineFrame);
     suppressClipClickUntil = Date.now() + 250;
   } else {
     deduplicateKeys(state.keyArray, state.key);
@@ -685,7 +690,7 @@ window.addEventListener('pointercancel', event => {
 });
 window.addEventListener('pointermove', event => {
   if (clipDrag && event.pointerId === clipDrag.pointerId && Math.hypot(event.clientX - clipDrag.startX, event.clientY - clipDrag.startY) > 5) {
-    if (!clipDrag.moved) setAssetDragState(findTrack(clipDrag.fromTrackId)?.type || null, true, false);
+    if (!clipDrag.moved) setAssetDragState(findTrack(clipDrag.fromTrackId)?.type || null, true, true);
     clipDrag.moved = true;
     document.body.classList.add('timeline-clip-dragging');
     const dx = event.clientX - clipDrag.startX, dy = event.clientY - clipDrag.startY;
@@ -708,10 +713,9 @@ window.addEventListener('pointermove', event => {
       if (!keyDrag.moved) return;
       autoScrollAtEdge(event);
       const start = clipStartFrame(clip.id);
-      const timelineFrame = Math.max(0, Math.min(clip.durationFrames - 1, Math.round(frameFromEvent(event) - start)));
-      const sourceFrame = timelineFrame + (Number(clip.sourceOffsetFrames) || 0);
+      const timelineFrame = Math.max(0, Math.min(clip.durationFrames - 1, Math.round(frameFromEvent(event) - start - keyDrag.grabOffsetFrames)));
       const loop = Math.max(0, Number(clip.loopDurationFrames) || 0);
-      keyDrag.key.frame = loop ? positiveModulo(sourceFrame, loop) : Math.max(0, sourceFrame);
+      keyDrag.key.frame = loop ? positiveModulo(timelineFrame, loop) : timelineFrame;
       keyDrag.button.dataset.keyFrame = keyDrag.key.frame;
       keyDrag.button.dataset.timelineFrame = timelineFrame;
       keyDrag.button.dataset.displayFrame = timelineFrame;
@@ -768,7 +772,7 @@ export function handleTimelineDrop(assetId, clientX, clientY = null) {
     assetId,
     trackId: track.id,
     durationFrames: asset.type === 'audio' && asset.duration ? Math.max(1, Math.round(asset.duration * app.project.fps)) : app.project.fps * 5,
-    loopDurationFrames: asset.type === 'audio' && asset.duration ? Math.max(1, Math.round(asset.duration * app.project.fps)) : app.project.fps * 5,
+    loopDurationFrames: asset.type === 'audio' && asset.duration ? Math.max(1, Math.round(asset.duration * app.project.fps)) : 0,
     sourceOffsetFrames: 0,
     transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, keys: { x: [], y: [], scale: [], rotation: [], opacity: [] } },
     rig: asset.type === 'image' ? { nodes: [], bones: [] } : null,

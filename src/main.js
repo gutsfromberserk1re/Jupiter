@@ -21,6 +21,7 @@ let mediaImportBusy = false;
 let mediaPointerDrag = null;
 let mediaDragGhost = null;
 let suppressMediaClick = false;
+let transformControlsCollapsed = false;
 
 window.jupiterToast = message => {
   const region = $('#toast-region');
@@ -364,9 +365,8 @@ function renderMedia() {
 
 function localFrameFor(clip) {
   const timelineFrame = Math.max(0, Math.min(clip.durationFrames - 1, app.project.currentFrame - clipStartFrame(clip.id)));
-  const sourceFrame = timelineFrame + (Number(clip.sourceOffsetFrames) || 0);
-  const loopDuration = Math.max(0, Number(clip.loopDurationFrames) || 0);
-  return loopDuration ? ((sourceFrame % loopDuration) + loopDuration) % loopDuration : sourceFrame;
+  const loopDuration = findAsset(clip.assetId)?.type === 'audio' ? Math.max(0, Number(clip.loopDurationFrames) || 0) : 0;
+  return loopDuration ? ((timelineFrame % loopDuration) + loopDuration) % loopDuration : timelineFrame;
 }
 function hasNodeKey(node, frame) { return !!node?.keys?.some(key => key.frame === frame); }
 function hasTransformKey(clip, property, frame) { return !!clip?.transform?.keys?.[property]?.some(key => key.frame === frame); }
@@ -422,6 +422,29 @@ function propertyField(label, value, key, options = {}) {
     const spacer = document.createElement('span'); row.appendChild(spacer);
   }
   return row;
+}
+
+function addEffectControlBar(section, title, { onReset, collapsed = false, onToggle } = {}) {
+  const bar = document.createElement('div'); bar.className = 'effect-control-bar';
+  const disclosure = document.createElement('button'); disclosure.type = 'button';
+  disclosure.className = 'effect-disclosure'; disclosure.setAttribute('aria-expanded', String(!collapsed));
+  disclosure.innerHTML = '<span class="effect-chevron" aria-hidden="true">⌄</span>';
+  const label = document.createElement('span'); label.textContent = title; disclosure.appendChild(label);
+  disclosure.addEventListener('click', () => {
+    const nextCollapsed = !section.classList.contains('effect-collapsed');
+    section.classList.toggle('effect-collapsed', nextCollapsed);
+    disclosure.setAttribute('aria-expanded', String(!nextCollapsed));
+    disclosure.querySelector('.effect-chevron').textContent = nextCollapsed ? '›' : '⌄';
+    onToggle?.(nextCollapsed);
+  });
+  bar.appendChild(disclosure);
+  if (onReset) {
+    const reset = document.createElement('button'); reset.type = 'button';
+    reset.className = 'reset-all'; reset.textContent = 'Reset all'; reset.title = `Reset ${title.toLowerCase()} controls`;
+    reset.addEventListener('click', onReset); bar.appendChild(reset);
+  }
+  section.classList.toggle('effect-collapsed', collapsed);
+  section.appendChild(bar);
 }
 
 function rigHierarchySection(clip) {
@@ -656,8 +679,7 @@ function renderInspector() {
     const start = clipStartFrame(clip.id), localFrame = localFrameFor(clip);
     const transform = evaluateClipTransform(clip, localFrame);
     const section = document.createElement('section'); section.className = 'property-section transform-section';
-    section.innerHTML = '<div class="property-heading"><h3>TRANSFORM</h3><button type="button" class="reset-all">Reset all</button></div>';
-    section.querySelector('.reset-all').addEventListener('click', () => {
+    const resetTransform = () => {
       pushUndo('Reset transform');
       const defaults = { x: 0, y: 0, rotation: 0, scale: 1, opacity: 1 };
       if (app.project.autoKey !== false) {
@@ -671,6 +693,11 @@ function renderInspector() {
         }
       }
       app.renderAll();
+    };
+    addEffectControlBar(section, 'Transform', {
+      onReset: resetTransform,
+      collapsed: transformControlsCollapsed,
+      onToggle: collapsed => { transformControlsCollapsed = collapsed; },
     });
     const transformFields = [
       ['Position X', 'x', transform.x, '0.1'], ['Position Y', 'y', transform.y, '0.1'],
@@ -932,6 +959,17 @@ async function saveProject(saveAs = false) {
   } catch (error) { window.jupiterToast(`Save failed: ${error}`); }
 }
 
+function normalizeKeyframes(keys) {
+  const unique = new Map();
+  for (const key of Array.isArray(keys) ? keys : []) {
+    if (!key || typeof key !== 'object') continue;
+    const frame = Math.max(0, Math.round(Number(key.frame) || 0));
+    key.frame = frame;
+    unique.set(frame, key);
+  }
+  return [...unique.values()].sort((a, b) => a.frame - b.frame);
+}
+
 function validateProject(data) {
   if (!data || typeof data !== 'object' || !Array.isArray(data.assets) || !Array.isArray(data.tracks) || !Array.isArray(data.clips)) throw new Error('This file is not a valid Jupiter project.');
   data.fps = Number(data.fps) || 24;
@@ -959,15 +997,34 @@ function validateProject(data) {
   data.clips.forEach(clip => {
     clip.durationFrames = Math.max(1, Number(clip.durationFrames) || data.fps * 5);
     const clipAsset = data.assets.find(asset => asset.id === clip.assetId);
+    const priorLoopDuration = Math.max(0, Number(clip.loopDurationFrames) || 0);
+    const priorSourceOffset = Number.isFinite(Number(clip.sourceOffsetFrames)) ? Number(clip.sourceOffsetFrames) : 0;
+    if (clipAsset?.type === 'image' && priorSourceOffset !== 0) {
+      const rebase = keys => (Array.isArray(keys) ? keys : []).map(key => {
+        if (!key || typeof key !== 'object') return key;
+        const shiftedFrame = Number(key.frame) - priorSourceOffset;
+        key.frame = priorLoopDuration > 0
+          ? ((shiftedFrame % priorLoopDuration) + priorLoopDuration) % priorLoopDuration
+          : Math.max(0, shiftedFrame);
+        return key;
+      });
+      clip.transform?.keys && Object.keys(clip.transform.keys).forEach(property => { clip.transform.keys[property] = rebase(clip.transform.keys[property]); });
+      clip.rig?.nodes?.forEach(node => { node.keys = rebase(node.keys); });
+    }
     const defaultLoop = clipAsset?.type === 'audio' && clipAsset.duration
       ? Math.max(1, Math.round(clipAsset.duration * data.fps))
       : clip.durationFrames;
-    clip.loopDurationFrames = Math.max(1, Number(clip.loopDurationFrames) || defaultLoop);
-    clip.sourceOffsetFrames = Number.isFinite(Number(clip.sourceOffsetFrames)) ? Number(clip.sourceOffsetFrames) : 0;
+    clip.loopDurationFrames = clipAsset?.type === 'audio'
+      ? Math.max(1, Number(clip.loopDurationFrames) || defaultLoop)
+      : 0;
+    clip.sourceOffsetFrames = clipAsset?.type === 'audio' ? priorSourceOffset : 0;
     clip.transform ??= { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
     clip.transform.keys ??= {};
-    for (const property of TRANSFORM_PROPERTIES) clip.transform.keys[property] ??= [];
-    if (clip.rig) { clip.rig.nodes ??= []; clip.rig.bones ??= []; clip.rig.nodes.forEach(node => { node.keys ??= []; }); }
+    for (const property of TRANSFORM_PROPERTIES) clip.transform.keys[property] = normalizeKeyframes(clip.transform.keys[property]);
+    if (clip.rig) {
+      clip.rig.nodes ??= []; clip.rig.bones ??= [];
+      clip.rig.nodes.forEach(node => { node.keys = normalizeKeyframes(node.keys); });
+    }
   });
   return data;
 }

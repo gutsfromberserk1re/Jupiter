@@ -45,13 +45,16 @@ export function evaluatedRig(clip, frame) {
 export function setNodePose(clip, nodeId, position, globalFrame, startFrame = 0) {
   const node = clip?.rig?.nodes.find(item => item.id === nodeId);
   if (!node) return;
-  let frame = Math.round(globalFrame - startFrame + (Number(clip.sourceOffsetFrames) || 0));
+  let frame = Math.round(globalFrame - startFrame);
   const loop = Math.max(0, Number(clip.loopDurationFrames) || 0);
   frame = loop ? ((frame % loop) + loop) % loop : Math.max(0, frame);
   node.keys ??= [];
-  const existing = node.keys.find(key => key.frame === frame);
+  const existing = [...node.keys].reverse().find(key => key.frame === frame);
   if (existing) { existing.x = position.x; existing.y = position.y; }
   else node.keys.push({ frame, x: position.x, y: position.y, interpolation: 'linear' });
+  const unique = new Map();
+  for (const key of node.keys) unique.set(key.frame, key);
+  node.keys = [...unique.values()];
   node.keys.sort((a, b) => a.frame - b.frame);
 }
 
@@ -140,12 +143,15 @@ export function setClipTransformValue(clip, property, value, globalFrame, startF
   clip.transform ??= { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
   clip.transform.keys ??= {};
   clip.transform.keys[property] ??= [];
-  let frame = Math.round(globalFrame - startFrame + (Number(clip.sourceOffsetFrames) || 0));
+  let frame = Math.round(globalFrame - startFrame);
   const loop = Math.max(0, Number(clip.loopDurationFrames) || 0);
   frame = loop ? ((frame % loop) + loop) % loop : Math.max(0, frame);
-  const existing = clip.transform.keys[property].find(key => key.frame === frame);
+  const existing = [...clip.transform.keys[property]].reverse().find(key => key.frame === frame);
   if (existing) existing.value = value;
   else clip.transform.keys[property].push({ frame, value, interpolation: 'linear' });
+  const unique = new Map();
+  for (const key of clip.transform.keys[property]) unique.set(key.frame, key);
+  clip.transform.keys[property] = [...unique.values()];
   clip.transform.keys[property].sort((a, b) => a.frame - b.frame);
   if (frame === 0) clip.transform[property] = value;
 }
